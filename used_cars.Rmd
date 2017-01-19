@@ -111,17 +111,7 @@ cars[, dateCrawled := NULL]  # Drop one more column
 I can now plot each remaining variable individually.
 
 ## Price
-
-```{r}
-theme_set(theme_light())
-
-# Now plot each variable in turn:
-ggplot(data = cars, aes(x = price)) + 
-    geom_histogram(fill = 'deepskyblue4', binwidth = 1000)
-
-```
-
-There are outliers up to over €100,000,000! This is clearly wrong as I don't know of any car that would sell for this kind of price! When looking at all cars over €100,000 in more detail, I noticed that many of these prices seem either entered at random or confused with kilometer: I found patterns such as '111111' or '12345678'. To try and filter out most of these issues, I assumed that such high-end cars would most likely be coupes, convertibles or SUVs. I also assumed that any price above €200,000 was an error. I then dropped any row that did not match these criteria and looked at the brands of cars above €75,000:
+From the summary above, we see that prices go up to over $€2.10.e^9$! This is obviously wrong. While looking at all cars over €100,000 in more detail, I noticed that many of these prices seemed either entered at random or confused with kilometers: I found patterns such as '111111' or '12345678', or modest Seats over €150,000. To try and filter out most of these issues, I assumed that such high-end cars would most likely be coupes, convertibles or SUVs. I also assumed that any price above €200,000 was an error. I then dropped any row that did not match these criteria and looked at the brands of cars above €75,000:
 
 ```{r}
 # Filter out most likely price errors:
@@ -136,6 +126,7 @@ cars[price > 75000, unique(brand)]
 Some of these brands are not considered premium and it is surprising to find them here. Let's see the models and prices:
 
 ```{r}
+# Examine non premium brands with prices over €75k:
 cars[price > 75000 & 
          brand %in% c("volkswagen", "seat", "ford", "opel", "renault",
                       "smart", "nissan", "mitsubishi")]
@@ -145,6 +136,7 @@ So we find an array of cars there, some unnamed. The VW Touareg and Ford Mustang
 There are also cars below €100, which I assume are also errors or sellers not wanting to filter themselves out of the price selector on the website. I will assign them an NA rather than removing the values, although most of the plots will probably exclude NAs.
 
 ```{r}
+# Further tidying up of price: 
 cars <- cars[price <= 75000 |
                  brand %in% c("chevrolet", "porsche", "other", "mercedes_benz", 
                               "bmw", "audi", "jaguar", "land-rover") |
@@ -180,6 +172,7 @@ This will basically tell us about the age of the vehicle. From the data summary,
 So we clearly need to tidy up this variable. To keep things simple, I select only vehicles registered since 1960. As the data was collected in 2016, we set that year as our upper bound. Then we plot a histogram.
 
 ```{r}
+# Leave out cars first registered before 1960 and, supposedly, after 2016:
 cars <- cars[yearOfRegistration >= 1960 & yearOfRegistration <= 2016]
 
 ggplot(data = subset(cars, !is.na(yearOfRegistration)),
@@ -203,4 +196,112 @@ ggplot(data = cars, aes(x = gearbox)) +
 
 The European market is primarily a manual transmission market, so no surprises here. Again, there are about 15,000 NAs.
 
+## Engine Power
 
+The engine power is measured in PS (which differ slightly from the British bhp). Again, we know from the summary that there are some nonsensical values in the data. I was prepared to remove anything below 40PS, but then I realised that there are [Trabants](https://en.wikipedia.org/wiki/Trabant_601) in the dataset! This venerable left-over from the East-German Communist era is now widely used in Berlin as a rental car for people looking for a different experience of the city. Its 2-stroke engine managed 26PS!. Out of respect for such an antiquity, I decided to set the lower bound at 25PS.
+
+As for the excessively high PS values, it looks like most of them are due to people confusing power output and engine capacity (in cm$^3$). I decided to set the limit at 600PS, a more than respectable value.
+
+```{r}
+# Drop cars with output below 25 or over 600:
+cars <- cars[powerPS >= 25 & powerPS <= 600, ]
+
+ggplot(data = subset(cars, !is.na(powerPS)),
+       aes(x = powerPS)) +
+    geom_histogram(binwidth = 10, fill = 'deepskyblue4') +
+    scale_x_continuous(breaks = seq(0, 600, 20)) +
+    theme(axis.text.x = element_text(angle = 90, hjust = 1))
+```
+
+The distribution is postively skewed with a long tail (that may contain errors, as we just saw).
+
+There are some prefered values -- around 60, 100, 120, 140 for instance. These are values that have become some sort of "market standards": Most manufacturers will offer engines around these values. It makes it easier for the consumer to compare products.
+
+## Model
+
+This factor variable contails 251 levels, far too many to plot. But we can select the top 20:
+
+```{r}
+# Create a data.table of unique model names sorted by their respective counts:
+model_count <- cars[, .N, by = model]
+model_count <- model_count[order(model_count$N, decreasing = TRUE), ]
+
+
+ggplot(data = model_count[1:10, ], 
+       aes(x = reorder(model, -N), y = N)) +
+    geom_bar(stat = 'identity', fill = 'deepskyblue4')
+```
+
+Without surprise, the Volkswagen Golf (the most popular car in Europe) is also number one in the dataset. Note the very large number of vehicles designated as "other" -- while some of them are probably models that exist but cannot be selected on the EBay website, it is unlikely that their number would be that high so we have to assume that once again, they are mostly due to human error.
+
+The next car on the list is the BMW 3-Series, which is by no means a cheap car. This fact alone shows that we are indeed working on the German market -- the most high-end market in Europe.
+
+## Mileage
+
+... or more accurately, "kilometreage".
+
+```{r}
+ggplot(data = cars, aes(x = kilometer)) +
+    geom_histogram(binwidth = 5000, fill = 'deepskyblue4')
+```
+
+This histogram clearly shows that mileage is not a free input field. This is surprising, because mileage is one of the most important pieces of information when it comes to used cars, so maximum accuracy would have been desirable. Moreover, when I went to E-Bay myself to try out the used car ad generator, I was able to enter any value. So maybe there is some aggregationg mechanism during data extract?
+
+The second thing that is striking with this chart is the predominance of 150,000km cars. Given the nature of the data, there is no point trying to apply scale transformations to improve the plot. This variable should actually be considered as a categorical variable more than a continuous one. I therefore add a variable in the dataset called ```km_cat```.
+
+```{r}
+cars <- cars[, km_cat := factor(kilometer)]
+```
+
+## Month of Registration
+
+Maybe this variable will help us explain the peak we observed in 2016 in the distribution ```yearOfRegistration```. We should also note from the summary in the beginning that ```monthOfRegistration``` contains nearly 38,000 NAs. Again, it is surprising that year seems mandatory (although its value is clearly not controlled) but month is not.
+
+```{r}
+ggplot(data = subset(cars, !is.na(monthOfRegistration)),
+       aes(x = monthOfRegistration)) +
+    geom_histogram(binwidth = 0.5, fill = 'deepskyblue4') +
+    scale_x_continuous(breaks = 1:12)
+```
+
+We could probably turn this variable into a factor -- we will see that brings us any benefit in the future.
+
+## Fuel Type
+
+This factor variable also contains many NAs (over 33,000).
+
+```{r}
+ggplot(data = cars, aes(x = fuelType)) +
+    geom_bar(fill = 'deepskyblue4') 
+```
+
+"Alternative"" sources of energy are almost negligible in this dataset, which is not surprising considering that over 50% of the vehicles were 12 to 13 years old when this data was extracted.
+
+Petrol is roughly twice as prominent as Diesel.
+
+## Brand
+
+This is another factor with many levels (40) so we will take the same approach as with ```model```.
+
+```{r}
+# Create a data.table of unique model names sorted by their respective counts:
+brand_count <- cars[, .N, by = brand]
+brand_count <- brand_count[order(brand_count$N, decreasing = TRUE), ]
+
+
+ggplot(data = brand_count[1:10, ], 
+       aes(x = reorder(brand, -N), y = N)) +
+    geom_bar(stat = 'identity', fill = 'deepskyblue4')
+```
+
+The top 5 brands are German. Number 6 is Ford, which is almost German as it has its European headquarters in Cologne and many of its European products are actually designed and built in Germany. The next two brands are French, then Fiat is Italian. Seat is Spanish but it is actually part of the VW Group and their cars share almost all their components with VW products.  
+In other words, German manufacturers are hugely dominant on their home turf.
+
+## Unrepaired Damage
+
+The variable ```notRepairedDamage``` can only take two values: "yes" or "no". But it does have NAs -- about 72,000, which is twice as many as the number of "yes". It does not seem like this is a mandatory field (and I could not find it on EBay).
+
+```{r}
+ggplot(data = cars, aes(x = notRepairedDamage)) +
+    geom_bar(fill = 'deepskyblue4') 
+```
