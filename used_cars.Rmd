@@ -1,0 +1,206 @@
+---
+title: "Used Cars Database"
+author: "Luc Frachon"
+date: "19 janvier 2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
+library(data.table)
+library(lubridate)
+library(ggplot2)
+library(ggthemes)
+```
+
+# INTRODUCTION
+
+The dataset that I am using in this project was found on Kaggle, the well-known Machine Learning Competition website.
+[Click here](https://www.kaggle.com/orgesleka/used-cars-database) for a full description of the dataset, or read the [description file](dataset_description.md).  
+
+I worked in the automotive industry for 12 years and I remain a devoted pistonhead, so getting a better understanding of the used car market was very appealing.
+
+This project focuses on the exploratory data analysis phase of the dataset. As such, it will not follow a very structured approach but should be considered more as exploratory notes and observations.
+
+---
+
+# Data Preparation
+
+The dataset is mostly tidy but there are some free text fields and many missing values. Moreover, some of the data is in German and needs to be translated. Most of the translations are straightforward, and Google Translate comes to the rescue where required!
+The "name" column is problematic: It is free text which causes all sorts of issues, and although a German NLP engineer could perhaps find interesting information in it, I chose to simply drop it.
+
+```{r}
+# Load the dataset in a data.table, excluding "names":
+cars <- fread('./autos.csv', na.strings = "", stringsAsFactors = TRUE, 
+              drop = 2)
+
+# Convert date columns to POSIXct:
+date_cols <- c("dateCrawled", "dateCreated", "lastSeen")
+for(c in date_cols) set(cars, 
+                        j = c,
+                        value = parse_date_time(cars[[c]], "%Y-%m-%d %H:%M:%S"))
+head(cars)
+str(cars)
+
+```
+
+The column ```abtest``` seems to be internal to E-Bay, probably the ```control``` or ```test``` groups for some internal A/B testing. I don't believe we will need it. The column ```nrOfPictures``` only contains zeros, probably a data collection issue. We don't need it either. I will also drop the ```postalCode``` column, because I don't plan to cross-reference the data with a postal map of Germany although that could be another interesting project.
+
+
+```{r}
+cars[, c('abtest', 'nrOfPictures', 'postalCode') := NULL]  # Drop 3 columns
+```
+
+The values in the different factors are fairly straightforward. I translate them into English; at the same time I drop the 12 adds from people looking to purchase a car (```offerType == Gesuch```), as I don't have confidence that they would have accurate information about car specifications, nor sensible asking prices. As a result, we no longer need this column.
+
+The ```seller``` column contains only 3 professional traders. The information is therefore of little interest and we can drop these three observations -- their number is insufficient for any usefull insight.
+
+Finally, I also noticed that some zeros should really be NAs: In ```price```, ```monthOfRegistration```, ```powerPS```.
+
+```{r include = FALSE}
+# Keep only private sellers and drop offerType column
+cars <- cars[offerType != 'Gesuch' & seller != 'gewerblich', ]
+cars[, offerType := NULL]
+cars[, seller := NULL]
+
+# Translate factor levels
+levels(cars$vehicleType) <- c(NA, 'other', 'people carrier', 'convertible', 
+                              'coupe', 'small car', 'estate', 'sedan', 'SUV')
+levels(cars$gearbox) <- c(NA, 'automatic', 'manual')
+levels(cars$notRepairedDamage) <- c(NA, 'yes', 'no')
+levels(cars$fuelType) <- c(NA, 'other', 'petrol', 'cng', 'diesel', 'electric',
+                           'hybrid', 'lpg')
+levels(cars$model)[which(levels(cars$model) == 'andere')] <- 'other'
+levels(cars$brand)[which(levels(cars$brand) == 'andere')] <- 'other'
+levels(cars$brand)[which(levels(cars$brand) == 'sonstige_autos')] <- 'other'
+
+# Convert some zeros to NA:
+cars[price == 0, price := NA]
+cars[monthOfRegistration == 0, monthOfRegistration := NA]
+cars[powerPS == 0, powerPS := NA]
+```
+
+The ```dateCreated``` and ```lastSeen``` columns might not be very useful in themselves, but they allow us to calculate how long an ad has been posted for, and thus gives us an approximate lower bound for selling time (assuming users remove their add when the car is sold).
+```{r include = FALSE}
+# Create a new variable for a selling time estimate:
+cars[, sellingTime := lastSeen - dateCreated]
+```
+
+
+We now have a clean and usable dataset:
+
+```{r}
+str(cars)
+```
+
+---
+
+# Description of Individual Variables
+
+Here, I look at each of the 16 variables independently to understand their distribution.
+```{r}
+summary(cars)
+```
+
+```dateCrawled```contains values between March 23, 2016 and April 7, 2016. This period of time is probably too short to be usefull in term of detecting trends. I therefore decide to drop this column as well.
+
+```{r include = FALSE}
+cars[, dateCrawled := NULL]  # Drop one more column
+```
+
+I can now plot each remaining variable individually.
+
+## Price
+
+```{r}
+theme_set(theme_light())
+
+# Now plot each variable in turn:
+ggplot(data = cars, aes(x = price)) + 
+    geom_histogram(fill = 'deepskyblue4', binwidth = 1000)
+
+```
+
+There are outliers up to over €100,000,000! This is clearly wrong as I don't know of any car that would sell for this kind of price! When looking at all cars over €100,000 in more detail, I noticed that many of these prices seem either entered at random or confused with kilometer: I found patterns such as '111111' or '12345678'. To try and filter out most of these issues, I assumed that such high-end cars would most likely be coupes, convertibles or SUVs. I also assumed that any price above €200,000 was an error. I then dropped any row that did not match these criteria and looked at the brands of cars above €75,000:
+
+```{r}
+# Filter out most likely price errors:
+cars <- cars[price <= 200000 &
+                 !(price > 100000 & 
+                 vehicleType %in% c('sedan', 'small car', 
+                                    'estate', 'people carrier', 'other')), ]
+cars[price > 75000, unique(brand)] 
+
+```
+
+Some of these brands are not considered premium and it is surprising to find them here. Let's see the models and prices:
+
+```{r}
+cars[price > 75000 & 
+         brand %in% c("volkswagen", "seat", "ford", "opel", "renault",
+                      "smart", "nissan", "mitsubishi")]
+```
+So we find an array of cars there, some unnamed. The VW Touareg and Ford Mustang seem legitimate. Let's drop the others.
+
+There are also cars below €100, which I assume are also errors or sellers not wanting to filter themselves out of the price selector on the website. I will assign them an NA rather than removing the values, although most of the plots will probably exclude NAs.
+
+```{r}
+cars <- cars[price <= 75000 |
+                 brand %in% c("chevrolet", "porsche", "other", "mercedes_benz", 
+                              "bmw", "audi", "jaguar", "land-rover") |
+                 model %in% c("mustang", "touareg"), ]
+cars <- cars[price >= 100,]
+```
+
+I then plot the variable again with log plus 1 transformation on the x-axis:
+```{r}
+ggplot(data = subset(cars, !is.na(price)), aes(x = price)) + 
+    geom_histogram(fill = 'deepskyblue4', bins = 200) +
+    scale_x_continuous(trans = "log1p") +
+    geom_vline(xintercept = median(cars$price), colour = 'blue') +
+    geom_vline(xintercept = mean(cars$price), colour = 'red') 
+```
+
+Using the transformation, we now have a roughly normal distribution. We notice that some bins have a much higher count than their neighbours, presumably ve The mean is represented with a red line and the median with a blue line.
+
+## Vehicle Type
+
+This categorical variable has 8 levels and indicates the body style of the car (sedan, coupe, SUV etc.)
+
+```{r}
+ggplot(data = cars, aes(x = vehicleType)) +
+    geom_bar(fill = 'deepskyblue4')
+```
+
+This tends to reflect the general West-European market, with a prominence of "family" vehicles and smaller volumes of "niche" products (although a sample of new car registrations would probably show a higher proportion of SUVs). Also note the large number of NAs -- about 20,000. E-Bay could definitely do a better job at encouraging their customers to write their ads properly.
+
+## Year of Registration
+
+This will basically tell us about the age of the vehicle. From the data summary, we saw that the minimum year is 1,000, which will come as a surprise to most historians. The maximum year is 9,999, which is obviously wrong as we will all be teleporting by then.
+So we clearly need to tidy up this variable. To keep things simple, I select only vehicles registered since 1960. As the data was collected in 2016, we set that year as our upper bound. Then we plot a histogram.
+
+```{r}
+cars <- cars[yearOfRegistration >= 1960 & yearOfRegistration <= 2016]
+
+ggplot(data = subset(cars, !is.na(yearOfRegistration)),
+       aes(x = yearOfRegistration)) +
+    geom_histogram(binwidth = 1, fill = 'deepskyblue4')
+```
+
+The distribution is close to normal, with the exception of three peaks: one in 1999-2000, one in 2005-2006 and a large one in 2016.  
+I did some research and it turns out that 1999, 2000, 2005, 2006 were all among the strongest years for new car registrations in Germany in the last 20 years. As they are also in the heart of the used car market in terms of age, it makes sense that they would translate into these peaks.  
+As for 2016, the explanation is less obvious, especially a the data was collected in March and April, which is quite ealy in the year. The peak could be due to some listing errors (on purpose or not) where owners enter a date at random or to attract visitors to their ad. It could also be linked to the website's features when creating an ad (eg. default value in drop-down menu).  
+But there could also be a number of genuine 2016 cars suddenly arriving on the market. Employees in the automotive industry have often access to cheap car leasing schemes, whereby they can change their vehicle every 6 months or so. More importantly, most manufacturers register large numbers of demonstrators, press units and self-registered cars (new vehicles registered by the manufacturer or its dealers, in order to artificially boost market share and / or create cheaper opportunities to capture some customers over the competition).
+
+## Transmission Type
+
+The ```gearbox``` variable can only take two values: manual or automatic.
+
+```{r}
+ggplot(data = cars, aes(x = gearbox)) +
+    geom_bar(fill = 'deepskyblue4')
+```
+
+The European market is primarily a manual transmission market, so no surprises here. Again, there are about 15,000 NAs.
+
+
