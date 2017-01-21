@@ -8,9 +8,12 @@ output: html_document
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
 library(data.table)
+library(dplyr)
 library(lubridate)
 library(ggplot2)
 library(ggthemes)
+library(gridExtra)
+library(GGally)
 ```
 
 # INTRODUCTION
@@ -80,10 +83,13 @@ cars[monthOfRegistration == 0, monthOfRegistration := NA]
 cars[powerPS == 0, powerPS := NA]
 ```
 
-The ```dateCreated``` and ```lastSeen``` columns might not be very useful in themselves, but they allow us to calculate how long an ad has been posted for, and thus gives us an approximate lower bound for selling time (assuming users remove their add when the car is sold).
+The ```dateCrawled``` and ```dateCreated``` columns might not be very useful in themselves, but they allow us to calculate how long an ad has been up for on the website, and thus gives us an approximate lower bound for selling time (see below for a discussion on this). By default this value is calculated in minutes, I convert it to days. With this new ```ad_up_time``` variable, we no longer need the other date variables.
+
 ```{r include = FALSE}
 # Create a new variable for a selling time estimate:
-cars[, sellingTime := lastSeen - dateCreated]
+cars[, ad_up_time := as.numeric(lastSeen - dateCrawled) / 1440]
+cars[, `:=`(dateCreated = NULL, lastSeen = NULL, dateCrawled = NULL)]
+
 ```
 
 
@@ -102,13 +108,7 @@ Here, I look at each of the 16 variables independently to understand their distr
 summary(cars)
 ```
 
-```dateCrawled```contains values between March 23, 2016 and April 7, 2016. This period of time is probably too short to be usefull in term of detecting trends. I therefore decide to drop this column as well.
-
-```{r include = FALSE}
-cars[, dateCrawled := NULL]  # Drop one more column
-```
-
-I can now plot each remaining variable individually.
+We have 12 variables which I can now plot each remaining variable individually.
 
 ## Price
 From the summary above, we see that prices go up to over $€2.10.e^9$! This is obviously wrong. While looking at all cars over €100,000 in more detail, I noticed that many of these prices seemed either entered at random or confused with kilometers: I found patterns such as '111111' or '12345678', or modest Seats over €150,000. To try and filter out most of these issues, I assumed that such high-end cars would most likely be coupes, convertibles or SUVs. I also assumed that any price above €200,000 was an error. I then dropped any row that did not match these criteria and looked at the brands of cars above €75,000:
@@ -185,6 +185,19 @@ I did some research and it turns out that 1999, 2000, 2005, 2006 were all among 
 As for 2016, the explanation is less obvious, especially a the data was collected in March and April, which is quite ealy in the year. The peak could be due to some listing errors (on purpose or not) where owners enter a date at random or to attract visitors to their ad. It could also be linked to the website's features when creating an ad (eg. default value in drop-down menu).  
 But there could also be a number of genuine 2016 cars suddenly arriving on the market. Employees in the automotive industry have often access to cheap car leasing schemes, whereby they can change their vehicle every 6 months or so. More importantly, most manufacturers register large numbers of demonstrators, press units and self-registered cars (new vehicles registered by the manufacturer or its dealers, in order to artificially boost market share and / or create cheaper opportunities to capture some customers over the competition).
 
+## Month of Registration
+
+Maybe this variable will help us explain the peak we observed in 2016 in the distribution ```yearOfRegistration```. We should also note from the summary in the beginning that ```monthOfRegistration``` contains nearly 38,000 NAs. Again, it is surprising that year seems mandatory (although its value is clearly not controlled) but month is not.
+
+```{r}
+ggplot(data = subset(cars, !is.na(monthOfRegistration)),
+       aes(x = monthOfRegistration)) +
+    geom_histogram(binwidth = 0.5, fill = 'deepskyblue4') +
+    scale_x_continuous(breaks = 1:12)
+```
+
+We could probably turn this variable into a factor -- we will see that brings us any benefit in the future.
+
 ## Transmission Type
 
 The ```gearbox``` variable can only take two values: manual or automatic.
@@ -253,19 +266,6 @@ The second thing that is striking with this chart is the predominance of 150,000
 cars <- cars[, km_cat := factor(kilometer)]
 ```
 
-## Month of Registration
-
-Maybe this variable will help us explain the peak we observed in 2016 in the distribution ```yearOfRegistration```. We should also note from the summary in the beginning that ```monthOfRegistration``` contains nearly 38,000 NAs. Again, it is surprising that year seems mandatory (although its value is clearly not controlled) but month is not.
-
-```{r}
-ggplot(data = subset(cars, !is.na(monthOfRegistration)),
-       aes(x = monthOfRegistration)) +
-    geom_histogram(binwidth = 0.5, fill = 'deepskyblue4') +
-    scale_x_continuous(breaks = 1:12)
-```
-
-We could probably turn this variable into a factor -- we will see that brings us any benefit in the future.
-
 ## Fuel Type
 
 This factor variable also contains many NAs (over 33,000).
@@ -294,14 +294,99 @@ ggplot(data = brand_count[1:10, ],
     geom_bar(stat = 'identity', fill = 'deepskyblue4')
 ```
 
-The top 5 brands are German. Number 6 is Ford, which is almost German as it has its European headquarters in Cologne and many of its European products are actually designed and built in Germany. The next two brands are French, then Fiat is Italian. Seat is Spanish but it is actually part of the VW Group and their cars share almost all their components with VW products.  
+The top 5 brands are German. Number 6 is Ford, which in Europe is almost German as it has its European headquarters in Cologne and many of its European products are actually designed and built in Germany. The next two brands are French, then Fiat is Italian. Seat is Spanish but it is actually part of the VW Group and their cars share almost all their components with VW products.  
 In other words, German manufacturers are hugely dominant on their home turf.
 
 ## Unrepaired Damage
 
-The variable ```notRepairedDamage``` can only take two values: "yes" or "no". But it does have NAs -- about 72,000, which is twice as many as the number of "yes". It does not seem like this is a mandatory field (and I could not find it on EBay).
+The variable ```notRepairedDamage``` can only take two values: "yes" or "no". But it does have NAs -- about 72,000, which is twice as many as the number of "yes". It does not seem like this is a mandatory field (and I could not find it on EBay). As I understand it, it refers to potential unrepaired damage on the vehicle being sold.
 
 ```{r}
 ggplot(data = cars, aes(x = notRepairedDamage)) +
     geom_bar(fill = 'deepskyblue4') 
 ```
+
+## Ad Up-time
+
+This is a composite variable that we created by substracting the ```dateCreated``` from the ```dateCrawled``` date. It is measured in days. Of course the idea is to look for potential correlations to other variables, especially ```price```. From that point of view, there are important limitations associated with ```ad_up_time```:
+ 
+ - We don't know whether there is any incitation for sellers to remove ads once the vehicle is sold. This means some ads might be really old and unattended despite the car having been sold long ago, through EBay or some other channel.
+ - We are not even sure that ads removed from the website cannot be present in the scaped data.
+
+
+```{r}
+ggplot(data = cars, aes(x = ad_up_time)) +
+    geom_histogram(binwidth = 7, fill = 'deepskyblue4') +
+    scale_x_continuous(breaks = seq(0, 2000, 120))
+```
+
+Here we have observations up to 2,000 days (nearly 5.5 years). The long tail contains a significant number of observations and there seems to be a lot of variance in the data, so it is difficult to just drop observations over an arbitrary number of days posted. But maybe we will have to do it.
+
+The other thing I notice is that there seems to be some prevailing values at roughly three months intervals. I am not sure why this is -- it might be related to the pricing scheme used by EBay...?
+
+---
+
+# Looking for Correlations
+
+In this section, I will examine pairs of variables to look for correlations, and then zoom in on some multi-variable combinations that seem particularly interesting.
+
+One issue we have is that ```brand``` contains 40 levels, which makes plots really hard to read (in addition to causing long processing times with the plot matrix). We can resolve this by grouping brands into categories based on brand perception. We could simply use mean prices to make these distinctions, but we would then create a correlation to price where there isn't necessarily one. Moreover, brand perception involves a lot more than just price -- there is history, perceived quality, marketing etc.
+
+So I chose another approach: Use my domain-knowledge to manually classify the 40 levels into clusters. I didn't plan on an exact number of clusters beforehand, just something manageable. I then intuitively grouped brands together and came up with ... clusters which I then named.  
+Althought this intuitive approach is subjective and far more time-consumming, I believe it actually adds information to the dataset, unlike the "group by price" methid which removes some. 
+
+```{r include = FALSE}
+other <- c('lada', 'trabant', 'other')
+budget <- c('chevrolet', 'daewoo', 'dacia')
+budget_plus <- c('hyundai', 'kia', 'skoda', 'daihatsu')
+mid_minus <- c('chrysler', 'fiat', 'ford', 'citroen', 'mitsubishi', 'opel', 
+               'rover', 'seat', 'suzuki')
+mid_range <- c('nissan', 'peugeot', 'renault', 'toyota')
+mid_plus <- c('honda', 'mazda', 'smart', 'subaru', 'volkswagen')
+premium_minus <- c('alfa_romeo', 'lancia', 'saab', 'jeep', 'volvo', 'mini')
+premium <- c('audi', 'bmw', 'jaguar', 'land_rover', 'mercedes_benz', 'porsche')
+
+cars[brand %in% other, brand_cat := 'other']
+cars[brand %in% budget, brand_cat := 'budget']
+cars[brand %in% budget_plus, brand_cat := 'budget_plus']
+cars[brand %in% mid_minus, brand_cat := 'mid_minus']
+cars[brand %in% mid_range, brand_cat := 'mid_range']
+cars[brand %in% mid_plus, brand_cat := 'mid_plus']
+cars[brand %in% premium_minus, brand_cat := 'premium_minus']
+cars[brand %in% premium, brand_cat := 'premium']
+
+cars$brand_cat <- as.factor(cars$brand_cat)
+```
+
+
+
+```{r cache = TRUE}
+ggpairs(select(cars, -c(model, kilometer, monthOfRegistration, brand)), 
+        cardinality_threshold = 40,
+        axisLabels = 'internal',
+        lower = list(combo = wrap('facethist', bins = 100)))
+
+ggsave('plot_matrix.png', width = )
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
