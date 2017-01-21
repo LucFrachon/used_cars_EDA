@@ -355,18 +355,28 @@ cars[brand %in% mid_plus, brand_cat := 'mid_plus']
 cars[brand %in% premium_minus, brand_cat := 'premium_minus']
 cars[brand %in% premium, brand_cat := 'premium']
 
-cars$brand_cat <- as.factor(cars$brand_cat)
-```
+cars$brand_cat <- ordered(cars$brand_cat, 
+                          levels = c('budget', 'budget_plus',
+                                    'mid_minus', 'mid_range',
+                                    'mid_plus', 'premium_minus',
+                                    'premium', 'other'),
+                          labels = c('budget', 'budget_plus',
+                                    'mid_minus', 'mid_range',
+                                    'mid_plus', 'premium_minus',
+                                    'premium', 'other'))
+ ```
 
-
+I then try to visualize variable associations with a plot matrix. 
 
 ```{r cache = TRUE}
-ggpairs(select(cars, -c(model, kilometer, monthOfRegistration, brand)), 
+cars[ , log_price := log10(price) ]
+
+ggpairs(select(cars, -c(price, model, kilometer, monthOfRegistration, brand)), 
         cardinality_threshold = 40,
         axisLabels = 'internal',
         lower = list(combo = wrap('facethist', bins = 100)))
 
-ggsave('plot_matrix.png', width = )
+ggsave('plot_matrix.png', width = 50, height = 50, units = 'cm', dpi = 400)
 ```
 
 
