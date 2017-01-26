@@ -463,11 +463,11 @@ The distribution looks very strange.
  price from a couple hundred Euros to maybe €20,000. Strangely, the bulk of cars just older than this seems to be more expensive, which suggests that they are more probably errors (intentional or not) or people just picking the first year available on the drop-down menu when listing their car. If these cars were really 2016 cars, it would be illogical for them to be advertised at cheaper prices than cars 5 years older. This strongly advocates in favour of filtering 2016 cars out of the data.
  - Thirdly, it seems that cars registered before the early 1990's become more expensive the older they get. This would be consistent with vintage vehicles that tend to gain value as they get older -- typically after 20-25 years, provided they are in good condition and were not too common to start with.
 
-Let's split the data in two with a cut-off in 1991 (25 years ago):
+Let's split the data in two with a cut-off in 1992 (24 years ago):
 
 ```{r include = FALSE}
-cars[yearOfRegistration <= 1991, collector_status := 'vintage']
-cars[(yearOfRegistration > 1991) & (!is.na(yearOfRegistration)), collector_status := 'modern']
+cars[yearOfRegistration <= 1992, collector_status := 'vintage']
+cars[(yearOfRegistration > 1992) & (!is.na(yearOfRegistration)), collector_status := 'modern']
 cars$collector_status <- as.factor(cars$collector_status)
 ```
 
@@ -480,7 +480,7 @@ ggplot(data = subset(cars,
         scale_fill_brewer(type = 'qual',
                        guide = guide_legend(reverse = TRUE,
                                             override.aes = list(alpha = 1,
-                                                                size = 2))) +
+                                                                size = 5))) +
     geom_smooth(data = subset(cars,
                               !is.na(yearOfRegistration) &
                               yearOfRegistration < 2016 &
@@ -491,7 +491,7 @@ ggplot(data = subset(cars,
                               collector_status == "vintage"), method = 'lm')
 ```
 
-Let's take a look at the correlation values:
+Now I would like to take a look at the correlation values:
 
 ```{r}
 print("Vintage cars:")
@@ -501,12 +501,83 @@ cars[collector_status == "modern", cor.test(price, yearOfRegistration)]
 
 ```
 
-The correlation is much weaker for vintage cars than for modern cars because of the greater variance. This variance comes partly from the lower count, but also probably because vintage car prices can vary enormously. They no longer compete with each other and their value depends on factors such as: rarity, quality of restoration, use of original parts only, authenticity (faithfulness to the exact specifications of the car when it came out of the factory), historical value, part usage, car's history etc.
+The correlation is much weaker for vintage cars than for modern cars because of the greater variance. This variance comes partly from the lower count, but also probably because vintage car prices can vary enormously accoriding to seemingly irrational factors. They no longer compete with each other so market pressure is different. Moreover their value depends on factors such as: rarity, quality of restoration, use of original parts only, authenticity (faithfulness to the exact specifications of the car when it came out of the factory), historical value, part usage, car's history etc.
 
 Two cars built exactly the same year, 40 years ago, and selling at the same price back then, can nowadays have orders of magnitude between their current value.
 
-```{r fig.cap="Brown diamonds represent means"}
+### Price vs. mileage
 
+In the previous section, I noticed that the variable `kilometer` behaves more like a categorical variable than a continuous one. However I want to try plotting both it to see which representation works best.
+
+```{r}
+ggplot(data = subset(cars, 
+                     !is.na(kilometer)),
+       aes(x = kilometer, y = log_price)) +
+    geom_point(colour = 'lightskyblue3', shape = '.', alpha = .25, 
+               position = 'jitter') +
+    scale_x_continuous(breaks = c(0, as.numeric(levels(cars$km_cat)))) +
+    geom_smooth() +
+    geom_smooth(method = 'lm')
+```
+
+There is an association to `log_price` that looks roughly linear, except between 5,000 and 20,000km. The clearest feature is that the variance increases with mileage. 
+Let's compare with a boxplot, this time treating mileage as a categorical variable:
+
+```{r fig.cap="Brown diamonds represent means"}
+ggplot(data = subset(cars, !is.na(km_cat)),
+       aes(x = km_cat, y = log_price)) +
+    geom_boxplot(colour = 'deepskyblue4', fill = 'deepskyblue1')
+```
+
+Despite `kilometer` being grouped in bins, I believe the scatter plot is a marginally better representation because the bins are not regularly spaced, so the box plot gives a distorted view.
+
+The 5000km data looks highly suspicious - we could be observing the same effect as with `yearOfRegistration == 2016`.
+Let's check that:
+
+### Year of Registration vs. Mileage
+
+
+```{r}
+ggplot(data = subset(cars, !is.na(kilometer) & yearOfRegistration < 2016), 
+       aes(x = yearOfRegistration, y = kilometer)) +
+    geom_point(colour = 'lightskyblue3', position = 'jitter', shape = '.',
+               alpha = 0.25) +
+    scale_x_continuous(breaks = seq(1960, 2015, 5), minor_breaks = NULL) +
+    scale_y_continuous(breaks = seq(0, 150000, 10000)) +
+    geom_smooth()
+```
+The smoother does not help very much but seems to indicate that, similarly to what we observed on price, kilomters tend to be positively correlated to the age of the car until about 15-20 ago, then negatively correlated after that. This could also be linked to the fact that vintage cars don't tend to run as much, as they are rarely the household's main car and are often of questionable reliability. Modern cars, on the other hand, generally have a higher mileage as they get older, as common sense would have it.
+However considering the dispersion in the early years of the dataset, I am not sure I should lend much credibility to this.
+
+We also notice a group of observations at 0 kilometers between 1995 and 2005 approximately, that do not seem to follow the general distribution. Since that period is precisely the one with the highest density of observations in the dataset, I suspect these cars actually have a much higher mileage and that the data is wrong.
+
+### Ad Uptime vs. All Other Continuous Variables
+
+From the plots below, it doesn't look like `ad_up_time`is going to be very informative. The matrix plot also reports that there is virtually no correlation to any other continuous variable.
+
+```{r}
+p1 <- ggplot(data = cars, aes(x = ad_up_time, y = log_price)) +
+    geom_point(alpha = .15, color = 'lightskyblue3', shape = ".",
+               position = 'jitter')
+p2 <- ggplot(data = cars, aes(x = ad_up_time, y = powerPS)) +
+    geom_point(alpha = .15, color = 'lightskyblue3', shape = ".",
+               position = 'jitter')
+p3 <- ggplot(data = cars, aes(x = ad_up_time, y = yearOfRegistration)) +
+    geom_point(alpha = .15, color = 'lightskyblue3', shape = '.',
+               position = 'jitter')
+p4 <- ggplot(data = cars, aes(x = ad_up_time, y = kilometer)) +
+    geom_point(alpha = .15, color = 'lightskyblue3', shape = ".",
+               position = 'jitter')
+grid.arrange(p1, p2, p3, p4, ncol = 2)
+```
+
+
+
+## Discrete variables
+
+
+
+```{r fig.cap="Brown diamonds represent means"}
 ggplot(data = subset(cars, 
                      fuelType %in% c("petrol", "diesel") & !is.na(gearbox)),
        aes(x = fuelType, y = price)) +
