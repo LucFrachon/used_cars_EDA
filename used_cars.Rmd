@@ -424,7 +424,7 @@ ggplot(data = subset(cars,
        aes(x = powerPS, y = log_price)) +
     geom_point(shape = 21, fill = 'deepskyblue1', 
                alpha = .05, position = 'jitter') +
-    geom_smooth(method = 'lm') +
+    geom_smooth() +
     facet_grid(gearbox ~fuelType)
 ```
 
@@ -465,15 +465,17 @@ The distribution looks very strange.
  price from a couple hundred Euros to maybe €20,000. Strangely, the bulk of cars just older than this seems to be more expensive, which suggests that they are more probably errors (intentional or not) or people just picking the first year available on the drop-down menu when listing their car. If these cars were really 2016 cars, it would be illogical for them to be advertised at cheaper prices than cars 5 years older. This strongly advocates in favour of filtering 2016 cars out of the data.
  - Thirdly, it seems that cars registered before the early 1990's become more expensive the older they get. This would be consistent with vintage vehicles that tend to gain value as they get older -- typically after 20-25 years, provided they are in good condition and were not too common to start with.
 
-Let's split the data in two with a cut-off in 1992 (24 years ago):
+Let's split the data in two with a cut-off in 1995 (21 years ago):
 
 ```{r include = FALSE}
-cars[yearOfRegistration <= 1992, collector_status := 'vintage']
-cars[(yearOfRegistration > 1992) & (!is.na(yearOfRegistration)), collector_status := 'modern']
+cars[yearOfRegistration <= 1995, collector_status := 'vintage']
+cars[(yearOfRegistration > 1995) & (!is.na(yearOfRegistration)), collector_status := 'modern']
 cars$collector_status <- as.factor(cars$collector_status)
 ```
 
+I now remove the 2016 cars from the dataset (there is only 4 months' worth of data for that year) and plot while making the distinction between vintage and modern cars.
 ```{r}
+cars <- cars[yearOfRegistration <2016, ]
 ggplot(data = subset(cars, 
                      !is.na(yearOfRegistration) & yearOfRegistration < 2016),
        aes(x = yearOfRegistration, y = log_price)) +
@@ -486,11 +488,12 @@ ggplot(data = subset(cars,
     geom_smooth(data = subset(cars,
                               !is.na(yearOfRegistration) &
                               yearOfRegistration < 2016 &
-                              collector_status == "modern"), method = 'lm') +
+                              collector_status == "modern")) +
     geom_smooth(data = subset(cars,
                               !is.na(yearOfRegistration) &
                               yearOfRegistration < 2016 &
-                              collector_status == "vintage"), method = 'lm')
+                              collector_status == "vintage")) +
+    scale_x_continuous(breaks = seq(1960, 2015, 5))
 ```
 
 Now I would like to take a look at the correlation values:
@@ -703,8 +706,8 @@ In this phase of the project, I reached the following conclusions:
 
 # Linear Regression
 
-Based on the knowledge that we gained on the previous phases of the project, I would like to attempt a linear regression to predict prices based on the most useful variables.
-I decided to select the following ones:
+Based on the knowledge that we gained on the previous phases of the project, I would like to attempt a linear regression to predict prices based on the most useful variables. To clean up the data further, I decided to remove all observations that are in the 5,000km group and were registered between 1990 and 2010. 
+I decided to select the following variables:
 
  - **Outcome:**
     - `log_price`
@@ -721,14 +724,15 @@ I decided to select the following ones:
 
 
 ```{r}
-cars_no_nas <- na.omit(cars)
-# train_indices <- sample(nrow(cars_no_nas), nrow(cars_no_nas) * .8)
-# test_indices <- setdiff(seq(nrow(cars_no_nas)), train_indices)
-# cars_train <- cars_no_nas[train_indices, ]
-# cars_test <- cars_no_nas[test_indices, ]
+require(dplyr)
+cars_no_nas <- na.omit(cars[!(yearOfRegistration %in% seq(1990, 2010) 
+                              & kilometer == 5000),
+                            ])
 
 fit <- lm(log_price ~ (powerPS + yearOfRegistration:collector_status + 
-              kilometer:collector_status + gearbox:fuelType + vehicleType + 
+              I(yearOfRegistration^(1/2)):collector_status + 
+              kilometer:collector_status + gearbox:fuelType + 
+              vehicleType + 
               brand_cat) : notRepairedDamage,
    data = cars_no_nas)
 summary(fit)
@@ -759,12 +763,15 @@ ggplot(data = test_examples,
        aes(x = price, y = pred_price)) +
     geom_point(colour = 'deepskyblue4') +
     geom_abline(slope = 1., intercept = 0., colour = 'red', size = 1) +
-    scale_x_log10() + scale_y_log10()
+    scale_x_log10() + scale_y_log10() + geom_smooth()
 ```
+We seem to have a non-linearity in the data which this linear model is missing.
 
-Let's have a look at the 
+Let's have a look at the residuals:
 
-```{r}
-qplot(fit)
+```{r fig.height=12, fig.width=12}
+par(mfrow = c(2, 2))
+plot(fit)
+par(mfrow = c(1, 1))
 ```
-
+The Residuals vs. Fitted plot seems to confirm this since we seem to have a linear, downward trend.
