@@ -1,0 +1,9 @@
+base
+data.table
+dplyr
+lubridate
+ggplot2
+ggthemes
+gridExtra
+GGally
+scales

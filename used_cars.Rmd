@@ -2,40 +2,46 @@
 title: "Used Cars Database"
 author: "Luc Frachon"
 date: "19 janvier 2017"
-output: html_document
+output: 
+  html_document:
+    fig_caption: yes
+
 ---
 
-```{r setup, include=FALSE}
+```{r setup, include=FALSE, results = 'asis', cache = TRUE}
 knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE, cache = TRUE)
-library(data.table)
+
 library(dplyr)
 library(lubridate)
 library(ggplot2)
+library(scales)
 library(ggthemes)
 library(gridExtra)
 library(GGally)
+
 set.seed(1515)
 ```
 
-# INTRODUCTION
+# Introduction
 
 The dataset that I am using in this project was found on Kaggle, the well-known Machine Learning Competition website.
 [Click here](https://www.kaggle.com/orgesleka/used-cars-database) for a full description of the dataset, or read the [description file](dataset_description.md).  
 
 I worked in the automotive industry for 12 years and I remain a devoted pistonhead, so getting a better understanding of the used car market was very appealing.
 
-This project focuses on the exploratory data analysis phase of the dataset. As such, it will not follow a very structured approach but should be considered more as exploratory notes and observations.
+This project focuses on the exploratory data analysis phase of the dataset. In particular, I will try to detect associations between variables, especially against price. The end-goal of such a project would be to build a price-prediction model for vehicles sold by eBay users.
 
 ---
 
-# Data Preparation
+# 0. Data Preparation
 
-The dataset is mostly tidy but there are some free text fields and many missing values. Moreover, some of the data is in German and needs to be translated. Most of the translations are straightforward, and Google Translate comes to the rescue where required!
+The dataset is well structured but there are some free text fields and many missing values. Moreover, some of the data is in German and needs to be translated. Most of the translations are straightforward, and Google Translate comes to the rescue where required!
 The "name" column is problematic: It is free text which causes all sorts of issues, and although a German NLP engineer could perhaps find interesting information in it, I chose to simply drop it.
 
 ```{r}
+library(data.table)
 # Load the dataset in a data.table, excluding "names":
-cars <- fread('./autos.csv', na.strings = "", stringsAsFactors = TRUE, 
+cars <- data.table::fread('./autos.csv', na.strings = "", stringsAsFactors = TRUE, 
               drop = 2)
 
 # Convert date columns to POSIXct:
@@ -48,32 +54,32 @@ str(cars)
 
 ```
 
-The column ```abtest``` seems to be internal to E-Bay, probably the ```control``` or ```test``` groups for some internal A/B testing. I don't believe we will need it. The column ```nrOfPictures``` only contains zeros, probably a data collection issue. We don't need it either. I will also drop the ```postalCode``` column, because I don't plan to cross-reference the data with a postal map of Germany although that could be another interesting project.
+The column ```abtest``` seems to be internal to E-Bay, probably the ```control``` or ```test``` groups for some internal A/B testing. I don't believe we will need it. The column ```nrOfPictures``` only contains zeros, probably a data collection issue. We don't need it either. I will also drop the ```postalCode``` column, because I don't intend to cross-reference the data with a postal map of Germany although that could be another interesting project.
 
 
-```{r}
+```{r include=FALSE}
 cars[, c('abtest', 'nrOfPictures', 'postalCode') := NULL]  # Drop 3 columns
 ```
 
-The values in the different factors are fairly straightforward. I translate them into English; at the same time I drop the 12 adds from people looking to purchase a car (```offerType == Gesuch```), as I don't have confidence that they would have accurate information about car specifications, nor sensible asking prices. As a result, we no longer need this column.
+The values in the different factors are fairly straightforward. I translate them into English; at the same time I drop the 12 ads from people looking to purchase a car (```offerType == Gesuch```), as I don't have confidence that they would have accurate information about car specifications, nor sensible asking prices. As a result, we no longer need this column.
 
-The ```seller``` column contains only 3 professional traders. The information is therefore of little interest and we can drop these three observations -- their number is insufficient for any usefull insight.
+The ```seller``` column contains only 3 professional traders, which is insignificant in comparison to the total number of observations. Therefore I drop the column.
 
 Finally, I also noticed that some zeros should really be NAs: In ```price```, ```monthOfRegistration```, ```powerPS```.
 
-```{r include = FALSE}
+```{r include=FALSE}
 # Keep only private sellers and drop offerType column
-cars <- cars[offerType != 'Gesuch' & seller != 'gewerblich', ]
+cars <- cars[offerType != 'Gesuch', ]
 cars[, offerType := NULL]
 cars[, seller := NULL]
 
 # Translate factor levels
-levels(cars$vehicleType) <- c(NA, 'other', 'people carrier', 'convertible', 
-                              'coupe', 'small car', 'estate', 'sedan', 'SUV')
-levels(cars$gearbox) <- c(NA, 'automatic', 'manual')
-levels(cars$notRepairedDamage) <- c(NA, 'yes', 'no')
-levels(cars$fuelType) <- c(NA, 'other', 'petrol', 'cng', 'diesel', 'electric',
-                           'hybrid', 'lpg')
+levels(cars$vehicleType) <- c('other', 'people carrier', 'convertible', 
+                              'coupe', 'small car', 'estate', 'sedan', 'SUV', NA)
+levels(cars$gearbox) <- c('automatic', 'manual', NA)
+levels(cars$notRepairedDamage) <- c('yes', 'no', NA)
+levels(cars$fuelType) <- c('other', 'petrol', 'cng', 'diesel', 'electric',
+                           'hybrid', 'lpg', NA)
 levels(cars$model)[which(levels(cars$model) == 'andere')] <- 'other'
 levels(cars$brand)[which(levels(cars$brand) == 'andere')] <- 'other'
 levels(cars$brand)[which(levels(cars$brand) == 'sonstige_autos')] <- 'other'
@@ -102,17 +108,17 @@ str(cars)
 
 ---
 
-# Description of Individual Variables
+# 1. Description of Individual Variables
 
-Here, I look at each of the 16 variables independently to understand their distribution.
+Here, I look at each of the variables independently to understand their distribution.
 ```{r}
 summary(cars)
 ```
 
-We have 12 variables which I can now plot each remaining variable individually.
+We have 12 variables which I can now plot individually.
 
-## Price
-From the summary above, we see that prices go up to over $€2.10.e^9$! This is obviously wrong. While looking at all cars over €100,000 in more detail, I noticed that many of these prices seemed either entered at random or confused with kilometers: I found patterns such as '111111' or '12345678', or modest Seats over €150,000. To try and filter out most of these issues, I assumed that such high-end cars would most likely be coupes, convertibles or SUVs. I also assumed that any price above €200,000 was an error. I then dropped any row that did not match these criteria and looked at the brands of cars above €75,000:
+## 1.1. Price
+From the summary above, we see that prices go up to over $€2.10^9$! This is obviously wrong. While looking at all cars over €100,000 in more detail, I noticed that many of these prices seemed either entered at random or confused with kilometers: I found patterns such as '111111' or '12345678', or mainstream models over €150,000. To try and filter out most of these issues, I assumed that such high-end cars would most likely be coupes, convertibles or SUVs. I also dropped any observation above €200,000, assuming the majority of them would be input errors. I then dropped any row that did not match these criteria and looked at the brands of cars above €75,000:
 
 ```{r}
 # Filter out most likely price errors:
@@ -124,7 +130,7 @@ cars[price > 75000, unique(brand)]
 
 ```
 
-Some of these brands are not considered premium and it is surprising to find them here. Let's see the models and prices:
+Some of these brands are not considered premium and it is surprising to find them here. Let's see the models and prices for the non-premium brands (Volkswagen, Seat, Ford, Opel, Renault, Smart, Nissan, Mitsubishi):
 
 ```{r}
 # Examine non premium brands with prices over €75k:
@@ -132,31 +138,33 @@ cars[price > 75000 &
          brand %in% c("volkswagen", "seat", "ford", "opel", "renault",
                       "smart", "nissan", "mitsubishi")]
 ```
-So we find an array of cars there, some unnamed. The VW Touareg and Ford Mustang seem legitimate. Let's drop the others.
+So we find a variety of models there, some unnamed. The VW Touareg and Ford Mustang seem legitimate. There are also some really old cars, for which a high price might be justified to a collector, but in most cases the model name is not mentioned for these so it is difficult to say whether they are genuinely expensive cars or errors. Since we have more than enough observations overall, I decide to drop them and only retain the VW Touareg and Ford Mustang.
 
-There are also cars below €100, which I assume are also errors or sellers not wanting to filter themselves out of the price selector on the website. I will assign them an NA rather than removing the values, although most of the plots will probably exclude NAs.
+There are also cars below €100, which I assume are also errors or sellers not wanting to filter themselves out of the price selector on the website. I drop these too.
 
 ```{r}
 # Further tidying up of price: 
 cars <- cars[price <= 75000 |
                  brand %in% c("chevrolet", "porsche", "other", "mercedes_benz", 
                               "bmw", "audi", "jaguar", "land-rover") |
-                 model %in% c("mustang", "touareg"), ]
+                 model %in% c("mustang", "touareg"), 
+             ]
 cars <- cars[price >= 100,]
 ```
 
 I then plot the variable again with log plus 1 transformation on the x-axis:
-```{r "Red bar indicates mean, blue bar indicates median"}
+```{r fig.cap="Red bar indicates mean, blue bar indicates median"}
 ggplot(data = subset(cars, !is.na(price)), aes(x = price)) + 
     geom_histogram(fill = 'deepskyblue4', bins = 200) +
-    scale_x_continuous(trans = "log1p") +
-    geom_vline(xintercept = median(cars$price), colour = 'blue', size = 2) +
-    geom_vline(xintercept = mean(cars$price), colour = 'brown', size = 2) 
+    scale_x_continuous(trans = "log1p", 
+                       breaks = c(100, 300, 1000, 3.e3, 1.e4, 3.e4, 1.e5, 3.e5)) +
+    geom_vline(xintercept = median(cars$price), colour = 'blue', size = 1) +
+    geom_vline(xintercept = mean(cars$price), colour = 'brown', size = 1) 
 ```
 
-Using the transformation, we now have a roughly normal distribution. We notice that some bins have a much higher count than their neighbours, presumably ve The mean is represented with a red line and the median with a blue line.
+With the scale transformation, we have a roughly normal distribution. We notice that some bins have a much higher count than their neighbours, presumably corresponding to round values or "psychological" prices (e.g. €9,900).
 
-## Vehicle Type
+## 1.2. Vehicle Type
 
 This categorical variable has 8 levels and indicates the body style of the car (sedan, coupe, SUV etc.)
 
@@ -165,14 +173,14 @@ ggplot(data = cars, aes(x = vehicleType)) +
     geom_bar(fill = 'deepskyblue4')
 ```
 
-This tends to reflect the general West-European market, with a prominence of "family" vehicles and smaller volumes of "niche" products (although a sample of new car registrations would probably show a higher proportion of SUVs). Also note the large number of NAs -- about 20,000. E-Bay could definitely do a better job at encouraging their customers to write their ads properly.
+This tends to reflect the general West-European market, with a prominence of "family" vehicles and smaller volumes of "niche" products (although a sample of new car registrations would probably show a higher proportion of SUVs considering the rise of this body style in recent years). Also note the large number of NAs -- about 20,000. E-Bay could definitely do a better job at encouraging their customers to write their ads properly.
 
-## Year of Registration
+## 1.3. Year of Registration
 
 This will basically tell us about the age of the vehicle. From the data summary, we saw that the minimum year is 1,000, which will come as a surprise to most historians. The maximum year is 9,999, which is obviously wrong as we will all be teleporting by then.
 So we clearly need to tidy up this variable. To keep things simple, I select only vehicles registered since 1960. As the data was collected in 2016, we set that year as our upper bound. Then we plot a histogram.
 
-```{r fig.cap = ="Red bar indicates mean"}
+```{r fig.cap="Red bar indicates mean, blue bar indicates median"}
 # Leave out cars first registered before 1960 and, supposedly, after 2016:
 cars <- cars[yearOfRegistration >= 1960 & yearOfRegistration <= 2016]
 
@@ -181,19 +189,23 @@ ggplot(data = subset(cars, !is.na(yearOfRegistration)),
     geom_histogram(binwidth = 1, fill = 'deepskyblue4') +
     scale_x_continuous(breaks = seq(1960, 2016, 5)) +
     geom_vline(xintercept = mean(cars$yearOfRegistration),
-               size = 2, colour = 'brown') +
+               size = 1, colour = 'brown') +
     geom_vline(xintercept = median(cars$yearOfRegistration),
-               size = 2, colour = 'blue')
+               size = 1, colour = 'blue')
 ```
 
-The distribution is close to normal, with the exception of three peaks: one in 1999-2000, one in 2005-2006 and a large one in 2016.  
+Note that the mean and the median are identical. The distribution is close to normal, with the following exceptions:
+ 
+ - A significant left tail
+ - Three peaks: one in 1999-2000, one in 2005-2006 and a large one in 2016.  
+ 
 I did some research and it turns out that 1999, 2000, 2005, 2006 were all among the strongest years for new car registrations in Germany in the last 20 years. As they are also in the heart of the used car market in terms of age, it makes sense that they would translate into these peaks.  
-As for 2016, the explanation is less obvious, especially a the data was collected in March and April, which is quite ealy in the year. The peak could be due to some listing errors (on purpose or not) where owners enter a date at random or to attract visitors to their ad. It could also be linked to the website's features when creating an ad (eg. default value in drop-down menu).  
+As for 2016, the explanation is less obvious, especially as the data was collected in March and April, which is quite ealy in the year. The peak could be due to some listing errors (on purpose or not) where owners enter a date at random or to attract visitors to their ad. It could also be linked to the website's features when creating an ad (eg. default value in drop-down menu).  
 But there could also be a number of genuine 2016 cars suddenly arriving on the market. Employees in the automotive industry have often access to cheap car leasing schemes, whereby they can change their vehicle every 6 months or so. More importantly, most manufacturers register large numbers of demonstrators, press units and self-registered cars (new vehicles registered by the manufacturer or its dealers, in order to artificially boost market share and / or create cheaper opportunities to capture some customers over the competition).
 
-## Month of Registration
+## 1.4. Month of Registration
 
-Maybe this variable will help us explain the peak we observed in 2016 in the distribution ```yearOfRegistration```. We should also note from the summary in the beginning that ```monthOfRegistration``` contains nearly 38,000 NAs. Again, it is surprising that year seems mandatory (although its value is clearly not controlled) but month is not.
+We should note from the summary in the beginning that ```monthOfRegistration``` contains nearly 38,000 NAs. Again, it is surprising that year seems mandatory (although its value is clearly not controlled) but month is not.
 
 ```{r}
 ggplot(data = subset(cars, !is.na(monthOfRegistration)),
@@ -202,22 +214,22 @@ ggplot(data = subset(cars, !is.na(monthOfRegistration)),
     scale_x_continuous(breaks = 1:12)
 ```
 
-We could probably turn this variable into a factor -- we will see that brings us any benefit in the future.
+March and June are the strongest month for vehicle registrations. A quick research on the internet confirmed that this is consistent with the car registration seasonality that we observe in Germany (incidently, there is a similar effect in France and the UK).
 
-## Transmission Type
+## 1.5. Transmission Type
 
 The ```gearbox``` variable can only take two values: manual or automatic.
 
 ```{r}
 ggplot(data = cars, aes(x = gearbox)) +
-    geom_bar(fill = 'deepskyblue4')
+    geom_bar(fill = 'deepskyblue4') 
 ```
 
 The European market is primarily a manual transmission market, so no surprises here. Again, there are about 15,000 NAs.
 
-## Engine Power
+## 1.6. Engine Power
 
-The engine power is measured in PS (which differ slightly from the British bhp). Again, we know from the summary that there are some nonsensical values in the data. I was prepared to remove anything below 40PS, but then I realised that there are [Trabants](https://en.wikipedia.org/wiki/Trabant_601) in the dataset! This venerable left-over from the East-German Communist era is now widely used in Berlin as a rental car for people looking for a different experience of the city. Its 2-stroke engine managed 26PS!. Out of respect for such an antiquity, I decided to set the lower bound at 25PS.
+The engine power is measured using the metric PS (1PS = 736 Watts). Again, we know from the summary that there are some nonsensical values in the data. I was prepared to remove anything below 40PS, but then I realised that there are [Trabants](https://en.wikipedia.org/wiki/Trabant_601) in the dataset! This venerable left-over from the East-German Communist era is now widely used in Berlin as a rental car for people looking for a different experience of the city. Its 2-stroke engine managed 26PS!. Out of respect for such an antiquity, I decided to set the lower bound at 25PS.
 
 As for the excessively high PS values, it looks like most of them are due to people confusing power output and engine capacity (in cm$^3$). I decided to set the limit at 600PS, a more than respectable value.
 
@@ -229,16 +241,16 @@ ggplot(data = subset(cars, !is.na(powerPS)),
        aes(x = powerPS)) +
     geom_histogram(binwidth = 10, fill = 'deepskyblue4') +
     scale_x_continuous(breaks = seq(0, 600, 20)) +
-    geom_vline(xintercept = mean(cars$powerPS), size = 2, colour = 'brown') +
-    geom_vline(xintercept = median(cars$powerPS), size = 2, colour = 'blue') +
+    geom_vline(xintercept = mean(cars$powerPS), size = 1, colour = 'brown') +
+    geom_vline(xintercept = median(cars$powerPS), size = 1, colour = 'blue') +
     theme(axis.text.x = element_text(angle = 90, hjust = 1))
 ```
 
 The distribution is postively skewed with a long tail (that may contain errors, as we just saw).
 
-There are some prefered values -- around 60, 100, 120, 140 for instance. These are values that have become some sort of "market standards": Most manufacturers will offer engines around these values. It makes it easier for the consumer to compare products.
+There are some prefered values -- around 60, 100, 120, 140 for instance. These are values that have become some sort of "market standards": Most manufacturers will offer engines around these values. It makes it easier for the consumer to compare products. Real, measurable power output of a car is never exactly equal to its rated horsepower due to variance in industrial processes. Differences of around 5% are not uncommon for a same model.
 
-## Model
+## 1.7. Model
 
 This factor variable contails 251 levels, far too many to plot. But we can select the top 20:
 
@@ -253,30 +265,30 @@ ggplot(data = model_count[1:10, ],
     geom_bar(stat = 'identity', fill = 'deepskyblue4')
 ```
 
-Without surprise, the Volkswagen Golf (the most popular car in Europe) is also number one in the dataset. Note the very large number of vehicles designated as "other" -- while some of them are probably models that exist but cannot be selected on the EBay website, it is unlikely that their number would be that high so we have to assume that once again, they are mostly due to human error.
+Without surprise, the Volkswagen Golf (the most popular car in Europe) is also number one in the dataset. Note the very large number of vehicles designated as "other" -- while some of them are probably models that exist but cannot be selected on the eBay website, it is unlikely that their number would be that high so we have to assume that once again, they are mostly due to human error.
 
 The next car on the list is the BMW 3-Series, which is by no means a cheap car. This fact alone shows that we are indeed working on the German market -- the most high-end market in Europe.
 
-## Mileage
+## 1.8. Mileage
 
 ... or more accurately, "kilometreage".
 
 ```{r fig.cap="Red bar indicates mean, blue bar indicates median"}
 ggplot(data = cars, aes(x = kilometer)) +
     geom_histogram(binwidth = 5000, fill = 'deepskyblue4') +
-    geom_vline(xintercept = mean(cars$kilometer), size = 2, colour = 'brown') +
-    geom_vline(xintercept = median(cars$kilometer), size = 2, colour = 'blue')
+    geom_vline(xintercept = mean(cars$kilometer), size = 1, colour = 'brown') +
+    geom_vline(xintercept = median(cars$kilometer), size = 1, colour = 'blue')
 ```
 
-This histogram clearly shows that mileage is not a free input field. This is surprising, because mileage is one of the most important pieces of information when it comes to used cars, so maximum accuracy would have been desirable. Moreover, when I went to E-Bay myself to try out the used car ad generator, I was able to enter any value. So maybe there is some aggregationg mechanism during data extract?
+This histogram clearly shows that mileage is not a free input field. This is surprising, because mileage is one of the most important pieces of information when it comes to used cars, so maximum accuracy would have been desirable. Moreover, when I went to E-Bay myself to try out the used car ad generator, I was able to enter any value. So maybe there is some aggregationg mechanism during data extract or the functionality changed recently?
 
-The second thing that is striking with this chart is the predominance of 150,000km cars. Given the nature of the data, there is no point trying to apply scale transformations to improve the plot. This variable should actually be considered as a categorical variable more than a continuous one. I therefore add a variable in the dataset called ```km_cat```.
+The second thing that is striking with this chart is the predominance of 150,000km cars. Given the nature of the data, there is no point trying to apply scale transformations to improve the plot. This variable should actually be considered as a categorical variable more than a continuous one. I therefore add a variable in the dataset called ```km_cat```. We will see later which one is more appropriate.
 
 ```{r}
 cars <- cars[, km_cat := factor(kilometer)]
 ```
 
-## Fuel Type
+## 1.9. Fuel Type
 
 This factor variable also contains many NAs (over 33,000).
 
@@ -289,7 +301,7 @@ ggplot(data = cars, aes(x = fuelType)) +
 
 Petrol is roughly twice as prominent as Diesel.
 
-## Brand
+## 1.10. Brand
 
 This is another factor with many levels (40) so we will take the same approach as with ```model```.
 
@@ -307,46 +319,10 @@ ggplot(data = brand_count[1:10, ],
 The top 5 brands are German. Number 6 is Ford, which in Europe is largely perceived as German as it has its European headquarters in Cologne and many of its European products are actually designed and built in Germany. The next two brands are French, then Fiat is Italian. Seat is Spanish but it is actually part of the VW Group and their cars share almost all their components with VW products.  
 In other words, German manufacturers are hugely dominant on their home turf.
 
-## Unrepaired Damage
+One issue we will have when looking for associations between variables is that with `brand` containing 40 levels, plots will be really hard to read (in addition to causing long processing times). We can improve this by grouping brands into categories based on brand perception. We could simply use mean prices to make these distinctions, but we would then create a correlation to price where there isn't necessarily one. Moreover, brand perception involves a lot more than just price -- there is history, perceived quality, marketing etc.
 
-The variable ```notRepairedDamage``` can only take two values: "yes" or "no". But it does have NAs -- about 72,000, which is twice as many as the number of "yes". It does not seem like this is a mandatory field (and I could not find it on EBay). As I understand it, it refers to potential unrepaired damage on the vehicle being sold.
-
-```{r}
-ggplot(data = cars, aes(x = notRepairedDamage)) +
-    geom_bar(fill = 'deepskyblue4') 
-```
-
-## Ad Up-time
-
-This is a composite variable that we created by substracting the ```dateCreated``` from the ```dateCrawled``` date. It is measured in days. Of course the idea is to look for potential correlations to other variables, especially ```price```. From that point of view, there are important limitations associated with ```ad_up_time```:
- 
- - We don't know whether there is any incitation for sellers to remove ads once the vehicle is sold. This means some ads might be really old and unattended despite the car having been sold long ago, through EBay or some other channel.
- - We are not even sure that ads removed from the website cannot be present in the scaped data.
-
-
-```{r fig.cap="Red bar indicates mean, blue car indicates median"}
-ggplot(data = cars, aes(x = ad_up_time)) +
-    geom_histogram(binwidth = 7, fill = 'deepskyblue4') +
-    scale_x_continuous(breaks = seq(0, 2000, 120)) +
-    geom_vline(xintercept = mean(cars$ad_up_time), colour = 'brown', size = 2) +
-    geom_vline(xintercept = median(cars$ad_up_time), colour = 'blue', size = 2)
-    
-```
-
-Here we have observations up to 2,000 days (nearly 5.5 years). The long tail contains a significant number of observations and there seems to be a lot of variance in the data, so it is difficult to just drop observations over an arbitrary number of days posted. But maybe we will have to do it.
-
-The other thing I notice is that there seems to be some prevailing values at roughly three months intervals. I am not sure why this is -- it might be related to the pricing scheme used by EBay...?
-
----
-
-# Looking for Correlations
-
-In this section, I will examine pairs of variables to look for correlations, and then zoom in on some multi-variable combinations that seem particularly interesting.
-
-One issue we have is that ```brand``` contains 40 levels, which makes plots really hard to read (in addition to causing long processing times with the plot matrix). We can resolve this by grouping brands into categories based on brand perception. We could simply use mean prices to make these distinctions, but we would then create a correlation to price where there isn't necessarily one. Moreover, brand perception involves a lot more than just price -- there is history, perceived quality, marketing etc.
-
-So I chose another approach: Use my domain-knowledge to manually classify the 40 levels into clusters. I didn't plan on an exact number of clusters beforehand, just something manageable. I then intuitively grouped brands together and came up with ... clusters which I then named.  
-Althought this intuitive approach is subjective and far more time-consumming, I believe it actually adds information to the dataset, unlike the "group by price" methid which removes some. 
+So I chose another approach: Use my domain-knowledge to manually classify the 40 levels into clusters. I didn't plan on an exact number of clusters beforehand, just something manageable. I then intuitively grouped brands together and came up with 8 clusters which I then named.  
+Althought this intuitive approach is subjective, I believe it actually adds information to the dataset, unlike the "group by price" method which removes some. 
 
 ```{r include = FALSE}
 other <- c('lada', 'trabant', 'other')
@@ -377,12 +353,54 @@ cars$brand_cat <- ordered(cars$brand_cat,
                                     'mid_minus', 'mid_range',
                                     'mid_plus', 'premium_minus',
                                     'premium', 'other'))
+
+ggplot(data = cars, aes(x = brand_cat)) +
+    geom_bar(fill = 'deepskyblue4')
 ```
 
-I then try to visualize variable associations with a plot matrix (to reduce computing time, I use a sample of 10,000 observations):
+There are large disparities between brand categories in terms of count. The biggest surprise is the predominance of the premium brands, which are supposedly the most expensive. But the analysis of the top 10 brands above explains it: This category contains BMW, Audi and Mercedes which are all among the most common brands in Germany. Clearly, this plot would look very different in most other countries.
 
-```{r cache = TRUE}
-cars[ , log_price := log10(price) ]
+## 1.11. Unrepaired Damage
+
+
+```{r}
+ggplot(data = cars, aes(x = notRepairedDamage)) +
+    geom_bar(fill = 'deepskyblue4') 
+```
+
+
+The variable ```notRepairedDamage``` can only take two values: "yes" or "no". But it does have NAs -- about 72,000, which is twice as many as the number of "yes". It does not seem like this is a mandatory field (and I could not find it on EBay). As I understand it, it refers to potential unrepaired damage on the vehicle being sold.
+
+## 1.12. Ad Up-time
+
+This is a composite variable that we created by substracting the ```dateCreated``` from the ```dateCrawled``` date. It is measured in days. Of course the idea is to look for potential correlations to other variables, especially ```price```. From that point of view, there are important limitations associated with ```ad_up_time```:
+ 
+ - We don't know whether there is any incitation for sellers to remove ads once the vehicle is sold. This means some ads might be really old and unattended despite the car having been sold long ago, through eBay or some other channel.
+ - We are not even sure that ads removed from the website cannot be present in the scaped data.
+
+
+```{r fig.cap="Red bar indicates mean, blue car indicates median"}
+ggplot(data = cars, aes(x = ad_up_time)) +
+    geom_histogram(binwidth = 7, fill = 'deepskyblue4') +
+    scale_x_continuous(breaks = seq(0, 2000, 120)) +
+    geom_vline(xintercept = mean(cars$ad_up_time), colour = 'brown', size = 1) +
+    geom_vline(xintercept = median(cars$ad_up_time), colour = 'blue', size = 1)
+    
+```
+
+Here we have observations up to 2,000 days (nearly 5.5 years). The long tail contains a significant number of observations and there seems to be a lot of variance in the data, so it is difficult to just drop observations over an arbitrary number of days posted.  
+The other thing I notice is that there seems to be some prevailing values at roughly three months intervals. I am not sure why this is -- it might be related to the pricing structure used by eBay...?
+
+---
+
+# 2. Multivariate Analyses
+
+In this section, I will examine pairs of variables to look for associations between variables, and then zoom in on some multi-variable combinations that seem particularly interesting.
+
+First, let's visualize potential variable associations with a plot matrix (to reduce computing time, I use a sample of 10,000 observations):
+
+```{r cache = TRUE, fig.width = 12, fig.height = 12}
+cars$log_price <- log10(cars$price)
 
 ggpairs(select(cars[sample(nrow(cars), 10000)], -c(price, model, km_cat, monthOfRegistration, brand)), 
         cardinality_threshold = 40,
@@ -390,61 +408,73 @@ ggpairs(select(cars[sample(nrow(cars), 10000)], -c(price, model, km_cat, monthOf
         lower = list(combo = wrap('facethist', bins = 100),
                      continuous = wrap('points', alpha = .2)))
 
-ggsave('plot_matrix.png', width = 50, height = 50, units = 'cm', dpi = 400)
+#ggsave('plot_matrix.png', width = 50, height = 50, units = 'cm', dpi = 400)
 ```
 
-Even so the plot matrix is too clutered to be easily readable so we will have to build individual plots for the most promising variable pairs. Eventually we would like to be able to predict prices based on the other variables, so let's focus on price as one of our variables for now.
+Even so the plot matrix is very clutered so we will build individual plots for the most promising variable pairs. Eventually I would like to be able to predict prices based on the other variables, so let's focus on price as one of our variables.
 
+## 2.1. Continuous variables
 
-## Continuous variables
-
-### Price vs. Power, by fuel type
+### 2.1.1. Price vs. Power, by Fuel Type
 
 The plot matrix above shows that these two variables have the highest linear correlation so let's start here.
-I make a scatterplot of `price` vs `PowerPS` with a colour-coding for `fuelType` (and keeping only the two most popular: petrol and Diesel):
+I make a scatterplot of `price` vs `PowerPS` with a colour-coding for `fuelType` (and keeping only the two most popular: petrol and Diesel -- upper-case D is intentional as Diesel is the name of the inventor, Rudolf Diesel):
 
 ```{r}
 ggplot(data = subset(cars, fuelType %in% c("petrol", "diesel")),
-       aes(x = powerPS, y = price, fill = fuelType)) +
-    geom_point(shape = 21, alpha = .05, position = 'jitter') +
+       aes(x = powerPS, y = log_price, fill = fuelType)) +
+    geom_point(shape = 21, alpha = .15, size = 1, position = 'jitter') +
     scale_fill_brewer(type = 'qual',
                        guide = guide_legend(reverse = TRUE,
                                             override.aes = list(alpha = 1,
                                                                 size = 2))) +
-    scale_y_continuous(
-        breaks = c(300, 1000, 3000, 10000, 30000, 100000, 300000)) +
-    coord_trans(x = 'identity', y = 'log10', limx = c(25, 400))
+    geom_smooth()
+    
 ```
 
-There clearly is a correlation between power and price. It seems that for a given power output, Diesel cars are more expensive (not a great surprise considering that modern Diesel powertrains are usually more technologically advanced), but it is hard to tell from this plot. I will separate fuel types, and while we are at it why not also add another dimension:
+There clearly is a correlation between power and price, which does not seem perfectly linear but rather looks a little like some kind of root or log function. It also seems that for a given power output, Diesel cars are more expensive (not a great surprise considering that modern Diesel powertrains are usually more technologically advanced), but it is hard to tell from this plot.
+
+``` {r}
+ggplot(data = subset(cars, fuelType %in% c("petrol", "diesel")),
+       aes(x = log(powerPS), y = log_price, fill = fuelType)) +
+    geom_point(shape = 21, alpha = .15, size = 1, position = 'jitter') +
+    scale_fill_brewer(type = 'qual',
+                       guide = guide_legend(reverse = TRUE,
+                                            override.aes = list(alpha = 1,
+                                                                size = 2))) +
+    geom_smooth()
+``` 
+Taking the log of powerPS definitely helps make the relationship look more linear for petrol cars, but it does not have very convincing results on Diesel cars. This means that when building the linear model, we will need a different set of parameters for each fuel type.
+
+I will separate fuel types, and since we are dealing with technical specifications of vehicles, I will add an extra dimension with transmission type (`gearbox`):
 
 ```{r}
 ggplot(data = subset(cars, 
                      fuelType %in% c("petrol", "diesel") & !is.na(gearbox)),
-       aes(x = powerPS, y = log_price)) +
+       aes(x = log(powerPS), y = log_price)) +
     geom_point(shape = 21, fill = 'deepskyblue1', 
                alpha = .05, position = 'jitter') +
     geom_smooth() +
-    facet_grid(gearbox ~fuelType)
+    facet_grid(gearbox ~ fuelType)
 ```
 
+We see that petrol cars are more spread out in terms of price and power than Diesel cars. Using the log of power, the smoothers are close to linear in the first category but not in the second one.
+We also notice that automatic cars tend to be both more powerful and more expensive than manual, but this will need to be confirmed later.
 
 ```{r}
 
-cars[, .(log_price_cor = cor(log_price, powerPS))]
+cars[, .(log_price_cor = cor(log_price, log(powerPS)))]
 cars[fuelType %in% c("petrol", "diesel") & !is.na(gearbox),
-     .(log_price_cor = cor(log_price, powerPS)), by = .(fuelType, gearbox)]
+     .(log_price_cor = cor(log_price, log(powerPS))), by = .(fuelType, gearbox)]
 
 ```
 
-So when grouped by transmission and fuel types, the correlations are all around the 50% mark (slightly higher for petrol automatic), which can be considered as average.
-
-The plots confirm that automatic cars tend to be both more powerful than manual cars. They are also generally more expensive when they come with a petrol engine. This is not so clear with Diesel, although we can say that the lowest prices are indeed higher with the auto transmissions. We will try confirm these observations later using boxplots.
+So when grouped by transmission and fuel types, the correlations are all around the .5 mark, except the Petrol / Automatic combination which is around .6. We see that the associations are similar in shape although for manual Diesel cars, the data points form a much tighter group so it is harder to tell.
 
 So far, we have found that there is a positive correlation of price with power, and perhaps associations to gearbox and fuel type.
 
 
-### Price vs. Year of Registration
+### 2.1.2. Price vs. Year of Registration
 
 Another continuous variable with a significant correlation to price (according to our plot matrix) is `yearOfRegistration`.
 
@@ -462,10 +492,10 @@ The distribution looks very strange.
 
  - The first feature that I notice is a clear positive correlation that looks roughly linear for cars registered from roughly 1992 or 1995 onwards.
  - Secondly, we see a vertical line of observations in 2016, which we had already noticed when looking at `yearOfRegistration` alone. On the scatter plot, we can see that this line includes cars at just about any
- price from a couple hundred Euros to maybe €20,000. Strangely, the bulk of cars just older than this seems to be more expensive, which suggests that they are more probably errors (intentional or not) or people just picking the first year available on the drop-down menu when listing their car. If these cars were really 2016 cars, it would be illogical for them to be advertised at cheaper prices than cars 5 years older. This strongly advocates in favour of filtering 2016 cars out of the data.
+ price from a couple hundred Euros to maybe €20,000. Strangely, the bulk of cars just older than this seems to be more expensive, which suggests that they are most probably errors (intentional or not) or people just picking the first year available on the drop-down menu when listing their car. If these cars were really 2016 cars, it would be illogical for them to be advertised at cheaper prices than cars 5 years older. This strongly advocates in favour of filtering 2016 cars out of the data.
  - Thirdly, it seems that cars registered before the early 1990's become more expensive the older they get. This would be consistent with vintage vehicles that tend to gain value as they get older -- typically after 20-25 years, provided they are in good condition and were not too common to start with.
 
-Let's split the data in two with a cut-off in 1995 (21 years ago):
+
 
 ```{r include = FALSE}
 cars[yearOfRegistration <= 1995, collector_status := 'vintage']
@@ -473,7 +503,8 @@ cars[(yearOfRegistration > 1995) & (!is.na(yearOfRegistration)), collector_statu
 cars$collector_status <- as.factor(cars$collector_status)
 ```
 
-I now remove the 2016 cars from the dataset (there is only 4 months' worth of data for that year) and plot while making the distinction between vintage and modern cars.
+Let's first split the data in two with a cut-off in 1995 (21 years ago) and remove the 2016 cars from the dataset (there is only 4 months' worth of data for that year and it seems highly inaccurate). I then plot the new data with a distinction beween vintage and modern cars.
+
 ```{r}
 cars <- cars[yearOfRegistration <2016, ]
 ggplot(data = subset(cars, 
@@ -508,9 +539,9 @@ cars[collector_status == "modern", cor.test(price, yearOfRegistration)]
 
 The correlation is much weaker for vintage cars than for modern cars because of the greater variance. This variance comes partly from the lower count, but also probably because vintage car prices can vary enormously accoriding to seemingly irrational factors. They no longer compete with each other so market pressure is different. Moreover their value depends on factors such as: rarity, quality of restoration, use of original parts only, authenticity (faithfulness to the exact specifications of the car when it came out of the factory), historical value, part usage, car's history etc.
 
-Two cars built exactly the same year, 40 years ago, and selling at the same price back then, can nowadays have orders of magnitude between their current value.
+Two cars built exactly the same year, 40 years ago, and selling at the same price back then, can nowadays have orders of magnitude between their current values.
 
-### Price vs. mileage
+### 2.1.3. Price vs. mileage
 
 In the previous section, I noticed that the variable `kilometer` behaves more like a categorical variable than a continuous one. However I want to try plotting both it to see which representation works best.
 
@@ -521,8 +552,7 @@ ggplot(data = subset(cars,
     geom_point(colour = 'lightskyblue3', shape = '.', alpha = .25, 
                position = 'jitter') +
     scale_x_continuous(breaks = c(0, as.numeric(levels(cars$km_cat)))) +
-    geom_smooth() +
-    geom_smooth(method = 'lm')
+    geom_smooth()
 ```
 
 There is an association to `log_price` that looks roughly linear, except between 5,000 and 20,000km. The clearest feature is that the variance increases with mileage. 
@@ -531,7 +561,10 @@ Let's compare with a boxplot, this time treating mileage as a categorical variab
 ```{r fig.cap="Brown diamonds represent means"}
 ggplot(data = subset(cars, !is.na(km_cat)),
        aes(x = km_cat, y = log_price)) +
-    geom_boxplot(colour = 'deepskyblue4', fill = 'deepskyblue1')
+    geom_boxplot(colour = 'deepskyblue4', fill = 'deepskyblue1') +
+    geom_point(aes(x = km_cat, y = log_price), stat = 'summary', fun.y = mean,
+               shape = 18, 
+               size = 4, colour = 'brown')
 ```
 
 Despite `kilometer` being grouped in bins, I believe the scatter plot is a marginally better representation because the bins are not regularly spaced, so the box plot gives a distorted view.
@@ -539,7 +572,7 @@ Despite `kilometer` being grouped in bins, I believe the scatter plot is a margi
 The 5000km data looks highly suspicious - we could be observing the same effect as with `yearOfRegistration == 2016`.
 Let's check for that in the next set of analyses:
 
-### Year of Registration vs. Mileage
+### 2.1.4. Year of Registration vs. Mileage
 
 
 ```{r}
@@ -551,12 +584,12 @@ ggplot(data = subset(cars, !is.na(kilometer) & yearOfRegistration < 2016),
     scale_y_continuous(breaks = seq(0, 150000, 10000)) +
     geom_smooth()
 ```
-The smoother seems to indicate that, similarly to what we observed on price, kilometers tend to be positively correlated to the age of the car until about 15-20 ago, then negatively correlated after that. This could also be linked to the fact that vintage cars don't tend to run as much, as they are rarely the household's main car and are often of questionable reliability. Modern cars, on the other hand, generally have a higher mileage as they get older, as common sense would have it.
-However considering the dispersion in the early years of the dataset, I am not sure I should lend much credibility to this.
 
-We also notice a group of observations at 5,000 kilometers between 1995 and 2005 approximately, that do not seem to follow the general distribution. Since that period is precisely the one with the highest density of observations in the dataset, I suspect these cars actually have a much higher mileage and that the data is wrong. These are most probably the same suspicious observations that we noticed just before, for which kilometers are most likely severely under-valued.
+The smoother seems to indicate that, similarly to what we observed on price, kilometers tend to be positively correlated to the age of the car up to 15-20 years old, then negatively correlated after that. This could also be linked to the fact that vintage cars don't tend to run as much, as they are rarely the household's main car and are often of questionable reliability. However considering the dispersion in the early years of the dataset, I am not sure I should lend much credit to this observation. Modern cars, on the other hand, generally have a higher mileage as they get older, as common sense would have it.
 
-### Ad Uptime vs. All Other Continuous Variables
+We also notice a group of observations at 5,000 kilometers between 1995 and 2005 approximately, that do not seem to follow the general distribution. Since that period is precisely the one with the highest density of observations in the dataset, I suspect these cars actually have a much higher mileage and that the data is wrong. These are probably the same suspicious observations that we noticed just before, for which kilometers are most likely severely under-valued.
+
+### 2.1.5. Ad Uptime vs. All Other Continuous Variables
 
 From the plots below, it doesn't look like `ad_up_time`is going to be very informative. The matrix plot also reports that there is virtually no correlation to any other continuous variable.
 
@@ -582,11 +615,11 @@ grid.arrange(p1, p2, p3, p4, ncol = 2)
 
 If anything, the very tenuous trends we observe are rather counter-intuitive: cars with a low `ad_up_time` seem to be generally cheaper and to have higher mileage than the rest.
 
-## Discrete variables
+## 2.2. Discrete variables
 
 In this section, we are going to look at combinations of discrete variables, with a stronger focus on price as this is the variable that I would like to explain.
 
-### Price vs. Transmission vs. Fuel Type
+### 2.2.1. Price vs. Transmission vs. Fuel Type vs. Gearbox
 
 ```{r fig.cap="Brown diamonds represent means"}
 ggplot(data = subset(cars, 
@@ -600,10 +633,9 @@ ggplot(data = subset(cars,
     facet_wrap(~ gearbox)
 ```
 
+This boxplot confirms that prices are generally higher for auto transmissions than for manuals, and also higher for Diesel cars than petrol. However there is more dispersion for auto and Diesel than for manual and petrol, probably due to their lower count in the data. We also notice that there are many outliers. Here I used a linear scale for price but cut off at €50,000, and there are many more outliers above the cut-off point that cannot be seen on the plotting area.
 
-This boxplot confirms that prices are generally higher for auto transmissions than for manuals, and also higher for Diesel cars than petrol. However there is more dispersion for auto and diesel than for manual and petrol, probably due to their lower count in the data. We also notice that there are many outliers. Here I used a linear scale for price but cut off at €50,000, and there are many more outliers above the cut-off point that cannot be seen on the plotting area.
-
-### Price vs. Vehicle Type
+### 2.2.2. Price vs. Vehicle Type
 
 ```{r fig.cap="Brown diamonds represent means", fig.height=12, fig.width=10}
 p1 <- ggplot(data = subset(cars, !is.na(vehicleType)),
@@ -622,13 +654,19 @@ p2 <- ggplot(data = subset(cars, !is.na(vehicleType)),
     scale_x_discrete(limits = rev(levels(cars$vehicleType))) +
     coord_flip()
 
-grid.arrange(p1, p2, ncol = 2)
+p3 <- ggplot(data = cars, 
+             aes(x = price)) +
+    geom_freqpoly(aes(colour = vehicleType)) +
+    scale_x_log10(breaks = c(1.e2, 1.e3, 1.e4, 1.e5))
+
+lay <- rbind(c(1, 2), c(3, 3))
+grid.arrange(grobs = list(p1, p2, p3), layout_matrix = lay, heights = c(3, 2))
 ```
 
-As expected, different vehicle types have different price distributions, most of them approaching normal when viewed on a logarithmic scale. The highst mean and median prices are found with SUVs, followed by convertibles, coupés and people carriers (minivans in the US).
+As expected, different vehicle types have different price distributions, most of them approaching normal when viewed on a logarithmic scale. The highest mean and median prices are found with SUVs, followed by convertibles, coupés and people carriers (minivans in the US).
 The variances of these distributions are quite large, coupés in particular. However this looks like a good contributor in explaining price differences.
 
-### Price vs. Brand category vs. Year of Registration
+### 2.2.3. Price vs. Brand category
 
 Since I took the time to manually classify brands by perceived "premiumness", let's have a look at potential associations with price:
 
@@ -649,7 +687,14 @@ p2 <- ggplot(data = cars,
     scale_x_discrete(limits = rev(levels(cars$brand_cat))) +
     coord_flip()
 
-grid.arrange(p1, p2, ncol = 2)
+p3 <- ggplot(data = cars, 
+             aes(x = price)) +
+    geom_freqpoly(aes(colour = brand_cat)) +
+    scale_x_log10(breaks = c(1.e2, 1.e3, 1.e4, 1.e5))
+
+lay <- rbind(c(1, 2), c(3, 3))
+grid.arrange(grobs = list(p1, p2, p3), layout_matrix = lay, heights = c(3, 2))
+
 ```
 
 In general, we observe a fairly logical pattern with higher prices for more premium brands. The only surpise is that the "budget" and "budget_plus" categories seem almost as expensive overall as the "premium_minus" brands. I am not sure why, maybe this has to do with the fact that some of the brands that make up these two categories are fairly recent and therefore have a younger population?
@@ -663,9 +708,15 @@ ggplot(data = cars, aes(x = brand_cat, y = yearOfRegistration)) +
     coord_trans(limy = c(1980,2016))
 ```
 
-It seems that my intuition was correct. These two categories are younger than the rest which would explain at least part of the observation we made previously.
+```{r}
+print("Median year of registration by brand category:")
+cars[, .(median(yearOfRegistration)), by = brand_cat]
+```
 
-### Price vs. Unrepaired Damage
+
+It seems that my intuition was correct. These two categories are younger than the rest (with a 4-5 year difference in the medians) which would explain at least part of the observation we made previously.
+
+### 2.2.4. Price vs. Unrepaired Damage
 
 ```{r}
 p1 <- ggplot(data = subset(cars, !is.na(notRepairedDamage)),
@@ -693,18 +744,7 @@ However we should note that the notion of unrepaired damage is somewhat vague. N
 
 ---
 
-# Conclusion from the Exploratory Analysis
-
-In this phase of the project, I reached the following conclusions:
-
- - This dataset is generally quite messy. I had to do quite a bit of data cleaning, and even then we spotted several clumps of highly dubious observations.
- - Defining a new variable `brand_cat` helped make more sense of the `brand` variable, 
- - There are clear associations between price and a number of other variables, categorical or discrete. In some cases (such as the year of registration), there are even two distinct correlations depending on the age of the vehicle.
- - The variable `ad_up_time` is not very informative. I believe it measures something that is too inacurate to be useful.
- 
----
-
-# Linear Regression
+# 3. Linear Regression
 
 Based on the knowledge that we gained on the previous phases of the project, I would like to attempt a linear regression to predict prices based on the most useful variables. To clean up the data further, I decided to remove all observations that are in the 5,000km group and were registered between 1990 and 2010. 
 I decided to select the following variables:
@@ -712,16 +752,14 @@ I decided to select the following variables:
  - **Outcome:**
     - `log_price`
  - **Continuous Predictors:**
-    - `powerPS`
+    - log of `powerPS` in interaction with `fuelType`, following our observations on the shape of the correlation
+    - `powerPS` in interaction with `fuelType`
     - `yearOfRegistration` in interaction with `collector_status`
     - `kilometer` in interaction with `collector_status`
  - **Discrete Predictors:**
-    - `gearbox` in interaction with `fuelType`
     - `vehicleType`
     - `brand_cat`
-    - `collector_status` in interaction with `yearOfRegistration` and `kilometer`
     - `notRepairedDamage` in interaction with everything else. The reason for this is that we saw that this particular variable is associated with a 3- or 4-fold price difference, therefore for all intents and purposes it defines two separate markets (much like `collector_status`)
-
 
 ```{r}
 require(dplyr)
@@ -729,16 +767,19 @@ cars_no_nas <- na.omit(cars[!(yearOfRegistration %in% seq(1990, 2010)
                               & kilometer == 5000),
                             ])
 
-fit <- lm(log_price ~ (powerPS + yearOfRegistration:collector_status + 
-              I(yearOfRegistration^(1/2)):collector_status + 
-              kilometer:collector_status + gearbox:fuelType + 
+fit <- lm(log_price ~  (powerPS : fuelType +
+              I(log(powerPS)) : fuelType +
+              gearbox +      
+              yearOfRegistration:collector_status + 
+              kilometer:collector_status + 
               vehicleType + 
               brand_cat) : notRepairedDamage,
    data = cars_no_nas)
 summary(fit)
 ```
 
-So this regression achieves $R^2=0.786$, which seems decent. To see that more explicitly, let's predict price on a few observations selected at random:
+So this regression achieves $R^2=0.765$, which seems decent. There are many unsignificant parameters though, most of them for low-count fuel types such as electric or natural gas.
+To view these results more explicitly, let's predict price on a few observations selected at random:
 
 ```{r}
 test_examples <- cars_no_nas[sample(nrow(cars_no_nas), 1000),]
@@ -749,7 +790,7 @@ print(head(test_examples, 20))
 ```
 
 We see that some predictions are really close whereas others are widely off the mark. Let's make this more visual:
-```{r}
+```{r fig.cap="The red line represents identity"}
 ggplot(data = test_examples,
        aes(x = price, y = pred_price)) +
     geom_point(colour = 'deepskyblue4') +
@@ -758,15 +799,15 @@ ggplot(data = test_examples,
 
 The higher the price, the more the predictions seem to get wrong, which is intuitively logical seeing that we predicted `log_price` and not `price` directly. In log10 coordinates, this phenomenon disappears but the opposite appears: Errors seem larger for low prices:
 
-```{r}
+```{r fig.cap="The red line represents identity"}
 ggplot(data = test_examples,
        aes(x = price, y = pred_price)) +
     geom_point(colour = 'deepskyblue4') +
     geom_abline(slope = 1., intercept = 0., colour = 'red', size = 1) +
-    scale_x_log10() + scale_y_log10() + geom_smooth()
+    scale_x_log10() + scale_y_log10()
 ```
-We seem to have a non-linearity in the data which this linear model is missing.
 
+We seem to generally underestimate prices a little.
 Let's have a look at the residuals:
 
 ```{r fig.height=12, fig.width=12}
@@ -774,4 +815,111 @@ par(mfrow = c(2, 2))
 plot(fit)
 par(mfrow = c(1, 1))
 ```
-The Residuals vs. Fitted plot seems to confirm this since we seem to have a linear, downward trend.
+
+The residuals vs. fitted plot shows that there is still some pattern left in the data, especially toward the high-end of price predictions where we tend to under-estimate the outcome variable. The normal Q-Q curve shows a lot of departure from the ideal which is characteristic of heavy-tailed data such as we have here. The Scale-Location plot shows that the data is not completely homoscedastic. Finally, there does not seem to be any overly influencial observations according to the Residuals vs. Leverage plot, but we did a lot of cleaning up beforehand to get rid of many outliers. Looking at the three observations for which we are provided indices in the plot, we see that they are all alternative fuel vehicles:
+```{r}
+cars_no_nas[c(145504, 40697, 166256)]
+```
+
+
+---
+# 4. Final Plots
+
+## 4.1. Price Distribution
+
+```{r warning = FALSE}
+ggplot(data = subset(cars, !is.na(price) & price != 0), aes(x = price)) + 
+    geom_histogram(fill = 'deepskyblue4', bins = 150) +
+    scale_x_continuous(trans = "log10", 
+                       breaks = c(100, 300, 1000, 3000, 10000, 30000, 100000, 300000),
+                       labels = c("100", "300", "1,000", "3,000", "10,000", "30,000", "100,000", "300,000"),
+                       name = "Price (in EURO), log scale") +
+    scale_y_continuous(name = "Count of cars")  +
+    geom_vline(xintercept = median(cars$price), colour = 'blue', size = 1) +
+    geom_vline(xintercept = mean(cars$price), colour = 'brown', size = 1) +
+    ggtitle("Distribution of Log10 Used Car Prices\n(Brown bar indicates mean, blue bar indicates median)")
+
+```
+
+When viewed on a logarithmic scale, the price distribution looks roughly normal (which means that is is severely skewed when viewed in linear scale). However we notice peaks at regular intervals, which seem to correspond to psychologically pleasing price points.
+The mean is significantly higher than the median which confims the heavy right tail of the distribution. Indeed, the summary statistics show that median price is €3,000 while mean is €17,800.
+
+## 4.2. Price vs Power, by Fuel and Gearbox
+
+```{r warning= FALSE, fig.width=8, fig.height = 10}
+ggplot(data = subset(cars, 
+                     fuelType %in% c("petrol", "diesel") & !is.na(gearbox)),
+       aes(x = powerPS, y = price)) +
+    geom_point(aes(fill = gearbox), shape = 21, 
+               alpha = .05, size = 1, position = 'jitter') +
+    scale_fill_brewer(type = 'qual', palette = 2,
+                       guide = guide_legend(reverse = TRUE,
+                                            override.aes = list(alpha = 1,
+                                                                size = 2))) +
+    geom_smooth() +
+    facet_wrap(~ fuelType, nrow = 2) +
+    ggtitle("Price vs. Power, by Fuel Type and Gearbox") +
+    scale_x_log10(breaks = c(30, 50, 100, 150, 300, 500),
+                       labels = c("30", "50", "100", "150", "300", "500"),
+                       name = "Power Output (PS), log scale") +
+    scale_y_log10(name = "Price in EURO, log scale", limits = c(100, 300000),
+                  breaks = c(100, 300, 1000, 3000, 10000, 30000, 100000, 300000),
+                  labels = c("100", "300", "1,000", "3,000", "10,000", "30,000", "100,000", "300,000"))
+```
+
+This plot hints at a roughly linear relationship between `log10(price)` and `log10(powerPS)`, at least for petrol cars. For Diesel cars, the relationship is approximately linear around the center of the distribution, but there is a group of outliers at low PS values that will probably penalise a model that would be based only on `log10(powerPS)`. This advocates for keeping a linear power output term in the model, and use both the linear and the log values in interaction with fuel type.
+
+The plot also indicates that automatic transmissions tend to be more powerful and more expensive than manual gearboxes.
+
+## 4.3. Price Distribution by Brand Category
+
+```{r fig.cap="Brown diamonds represent means", fig.height= 10, fig.width=10}
+
+p1 <- ggplot(data = cars,
+             aes(y = price, x = brand_cat)) +
+    geom_boxplot(colour = 'deepskyblue4', fill = 'deepskyblue2') +
+    scale_y_log10(name = "Price in EURO (log scale)", 
+                  breaks = c(100, 300, 1000, 3000, 10000, 30000, 100000, 300000),
+                  labels = c("100", "300", "1,000", "3,000", "10,000", "30,000", "100,000", "300,000")) +
+    geom_point(aes(x = brand_cat, y = price), stat = 'summary', fun.y = mean,
+               shape = 18, 
+               size = 4, colour = 'brown') +
+    scale_x_discrete(name = "Brand category", limits = levels(cars$brand_cat))
+
+p2 <- ggplot(data = cars, 
+             aes(x = price)) +
+    geom_freqpoly(aes(colour = brand_cat)) +
+    scale_x_log10(name = "Price in EURO (log scale)",
+                  breaks = c(100, 300, 1000, 3000, 10000, 30000, 100000, 300000),
+                  labels = c("100", "300", "1,000", "3,000", "10,000", "30,000", "100,000", "300,000")) +
+    scale_y_continuous(name = "Count of cars")
+
+lay <- rbind(c(1, 2), c(3, 3))
+grid.arrange(p1, p2, ncol = 1, top = "Price Distribution by Brand Category")
+
+```
+
+This plot shows that the brand categories that we defined manually are quite logical and correlate well with price. The only surprise is that cars in the budget and budget_plus categories are actually more expensive on average than many of the other categories. One probable reason for this is that, as we've shown, vehicles in these two categories are much younger on average, simply because "low-cost" brands are a fairly new phenomenon in Europe.
+
+
+---
+# Reflection
+
+Using a dataset made available on Kaggle and using data from the German eBay used car ads, I started by doing significant amounts of data cleaning, translations and conversions. I was then able to analyse each variable in turn and noticed that the price variable in particular had a very negatively skewed distribution and that a log transform was required. This initial phase of the analysis also allowed me to discover more issues with the data. Year of registration, price and mileage all had non-sensical entries, most probably due to human errors and maybe cheekiness. Most variables have large amounts of missing values.
+The brand and model variables tell us a lot about the German market, one of the most high-end market in Europe.
+Finally, I established that the ad up time was probably not usable as a predictor.
+
+I was then able to look at associations between variables. I established that among the continuous variables, power had highest correlation to price, especially in log form, but with different profiles depending on fuel and transmission types. Looking at mileage was interesting because it exhibited two distinct correlations to price, one for "modern" cars and one for "vintage". Mileage, another strong contributor, is unfortunately not really a continuous variable in this dataset, as it can only take a few distinct values.
+
+Most categorical variables are also useful to the model. Fuel, gearbox and vehicle type all have associations with price. Unrepaired damages are associated to such a price drop that they litterally create a parallel market, which we must make sure that our linear model is able to capture as distinct from the bulk of the transactions.
+
+Finally, the brand category variable that I manually created turned out to be quite useful as well as it exhibits a significant association to price.
+
+Using the knowledge I had gained from this exploratory analysis, I built a linear model that explains 76.5% of the variance in the data. While this is not a very high level of accuracy, it is a very crude model that cannot account for all associations between variables. For instance, the price of vintage cars can vary differently depending on the brand of the vehicle. Since brand contains over 40 levels, I deliberately aggregated it into categories that try to reflect current market perception, not that of 25 or 30 years ago, so it would not necessarily be adequate as a predictor for vintage car prices. I also left `model` out of my set of predictors because it has over 200 levels, which is too complex for what I was trying to achieve here. Other potential predictors such as post code and free text description were also left out; while they would require a lot more work to provide sensible information, they could add significantly to the model.
+
+Among other limitations, there is the high level of human error that this dataset seems to contain. To understand the source of some of those errors or to identify some new ones, it would be useful to be able to access the German eBay website as it was when data collection was performed. Similarly, I would like to better understand the criteria and process that were applied when scraping the website.
+
+Finally, it would be interesting to compare this dataset to used car data from other sources to see if the model developped here would give us the same level of accuracy, or if eBay market prices are specific.
+
+As a closing observation, I would point out that we often hear that domain-knowledge is critical to a good data analyst. I don't know if it is a general rule, but in the present project, I found that an in-depth knowledge of the automotive market definitely helped me make more meaningful analyses, develop relevant theories and engineer useful variables.
+ 
