@@ -11,6 +11,7 @@ This project looks at the [Used Cars Dataset] (https://www.kaggle.com/orgesleka/
 ## Content
 
  * used_cars.Rmd: Main file, in R Markdown format. Open and render to HTML with RStudio.
+ * used_cars.html: Rendered version of the above.
  * dataset_description.md: Description of the data and its variables.
  * external_references.md: Links to external websites used to document the analysis.
  
