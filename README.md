@@ -1,7 +1,7 @@
 # Used Cars Database
 
 This project uses a dataset coming from [Kaggle](https://www.kaggle.com/orgesleka/used-cars-database) that contains data scraped from the German Ebay Small Ads website.
-I ran EDA on it to explore the data and built a simple regression model for price.
+Using previous experience from the automotive industry, I conduct in-depth EDA on it to explore the data, understand relationships between variables, and build a regression model for price.
 ---
 
 ## Data
@@ -18,7 +18,7 @@ This project looks at the [Used Cars Dataset] (https://www.kaggle.com/orgesleka/
 ## Summary of the project
 
 Exploratory Data Analysis to uncover correlations between variables and the strongest contributors to used car prices.
-I decribe data manipulation, individual variables and bivariate / multivariate analyses.
+I decribe data manipulation, individual variables and bivariate / multivariate analyses. My extensive experience in the automotive industry helps me engineer relevant features and interpret patters in the data.
 I then build a simple linear model for predicting used car prices using log transformations and interaction terms.
 Finally the _Reflections_ section offers some ways to improve the data and gain further insights.
 
