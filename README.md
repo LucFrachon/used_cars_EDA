@@ -6,7 +6,7 @@ Using previous experience from the automotive industry, I conduct in-depth EDA o
 
 ## Data
 
-This project looks at the [Used Cars Dataset] (https://www.kaggle.com/orgesleka/used-cars-database) available on Kaggle. The data was scrapped from the Used Cars section of the German eBay website.
+This project looks at the [Used Cars Dataset](https://www.kaggle.com/orgesleka/used-cars-database) available on Kaggle. The data was scrapped from the Used Cars section of the German eBay website.
 
 ## Content
 
